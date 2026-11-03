@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import { IconCompass, IconShelf, IconStore, IconUser } from './Icons';
+import { IconShelf, IconUser } from './Icons';
 
-export type TabKey = 'shelf' | 'store' | 'discover' | 'mine';
+export type TabKey = 'shelf' | 'mine';
 
 interface TabDef {
   key: TabKey;
@@ -9,10 +9,9 @@ interface TabDef {
   icon: ReactNode;
 }
 
+/** 掌阅 8.8.1 的底部通栏是「书架 / 书城 / 发现 / 我的」，这里只保留本地可用的两项 */
 const TABS: TabDef[] = [
   { key: 'shelf', label: '书架', icon: <IconShelf /> },
-  { key: 'store', label: '书城', icon: <IconStore /> },
-  { key: 'discover', label: '发现', icon: <IconCompass /> },
   { key: 'mine', label: '我的', icon: <IconUser /> },
 ];
 
@@ -21,7 +20,6 @@ interface TabBarProps {
   onChange: (key: TabKey) => void;
 }
 
-/** 底部四页签，对应掌阅的「读书 / 书城 / 发现 / 我的」 */
 export function TabBar({ active, onChange }: TabBarProps) {
   return (
     <nav className="tabbar" role="tablist">

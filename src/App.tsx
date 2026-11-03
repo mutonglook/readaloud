@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Shelf } from './pages/Shelf';
-import { Store } from './pages/Store';
-import { Discover } from './pages/Discover';
 import { Mine } from './pages/Mine';
 import { Reader } from './pages/Reader';
 import { Settings } from './pages/Settings';
@@ -73,8 +71,6 @@ export default function App() {
     <div className="app">
       <div className="app__main" ref={mainRef} key={tab}>
         {tab === 'shelf' && <Shelf onOpen={openBook} onToast={showToast} />}
-        {tab === 'store' && <Store onToast={showToast} />}
-        {tab === 'discover' && <Discover />}
         {tab === 'mine' && (
           <Mine onOpenSettings={() => setSettingsOpen(true)} onOpenBook={openBook} onToast={showToast} />
         )}

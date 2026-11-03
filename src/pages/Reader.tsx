@@ -61,6 +61,13 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
   const [hint, setHint] = useState<string | null>(null);
   const [fontStack, setFontStack] = useState(FONT_OPTIONS[0].stack);
   const [restored, setRestored] = useState(false);
+  // 掌阅页脚右侧是「时间 · 页码 · 百分比」，这里每半分钟走一次
+  const [clock, setClock] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = setInterval(() => setClock(new Date()), 30000);
+    return () => clearInterval(id);
+  }, []);
 
   const streamRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -411,6 +418,7 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
     ((chapterIndex + (pages > 1 ? page / pages : 0)) / book.chapters.length) * 100,
   );
   const dim = (1 - reader.brightness) * 0.72;
+  const clockText = `${String(clock.getHours()).padStart(2, '0')}:${String(clock.getMinutes()).padStart(2, '0')}`;
   const tocList = tocAsc ? book.chapters.map((c, i) => ({ c, i })) : book.chapters.map((c, i) => ({ c, i })).reverse();
 
   return (
@@ -482,12 +490,16 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
           </div>
         </div>
 
-        {/* 页脚：章节 + 页码 */}
+        {/* 页脚：章节 + 时间/页码，掌阅的这一行一直显示在正文下方 */}
         {!flow && (
           <div className="rd__foot">
-            <span>{chapter.title}</span>
-            <span>
-              {page + 1}/{pages} · {chapterPct}%
+            <span className="rd__foot-ch">{chapter.title}</span>
+            <span className="rd__foot-pg">
+              {clockText}
+              <em>·</em>
+              {page + 1}/{pages}
+              <em>·</em>
+              {chapterPct}%
             </span>
           </div>
         )}
@@ -555,10 +567,6 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
             {reader.theme === 'night' ? <IconSun size={20} /> : <IconMoon size={20} />}
             夜间
           </button>
-          <button className="rd__tool" onClick={() => openSheet('type')}>
-            <IconType size={20} />
-            字体
-          </button>
           <button
             className={`rd__tool${isSpeakingHere ? ' on' : ''}`}
             onClick={() => {
@@ -568,6 +576,10 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
           >
             <IconHeadphone size={20} />
             听书
+          </button>
+          <button className="rd__tool" onClick={() => openSheet('type')}>
+            <IconType size={20} />
+            字体
           </button>
           <button className="rd__tool" onClick={() => openSheet('all')}>
             <IconMore size={20} />
