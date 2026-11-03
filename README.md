@@ -2,6 +2,16 @@
 
 > **云端版本（主版本）**：https://www.workbuddy.cn/space/d/gO9r1Zl99uE2k3p449mciC
 > 后续文档改动以云端版本为准，本地这份保持同步。
+>
+> **代码仓库**：https://github.com/mutonglook/readaloud
+
+## 直接下载 APK
+
+**最新安装包**：https://github.com/mutonglook/readaloud/releases/latest/download/tingshuge-v1.0.0.apk
+
+手机浏览器打开即可下载，安装时如提示「未知来源」，在系统设置里允许本次安装。这是 debug 签名包，可以正常安装使用，但不能上架应用商店。
+
+每次往 `main` 分支提交，GitHub Actions 会自动重新打包（约 3 分钟）；推一个 `v*` 标签则自动发布新版本到 Releases。
 
 一个能**看**也能**听**的 Android 阅读器。导入 TXT / EPUB，像翻书一样读，也可以让它一句句念给你听——锁屏了还在念。
 
@@ -94,12 +104,20 @@ cd android
 ./gradlew assembleDebug          # Windows: gradlew.bat assembleDebug
 ```
 
-### 方式三：GitHub Actions（电脑上没有 Android 环境时）
+### 方式三：GitHub Actions（已配置好，无需本机环境）
 
-把项目推到 GitHub，`.github/workflows/android.yml` 会自动构建，
-在 Actions 页面下载 `readaloud-debug` 制品即可。
+仓库已接好流水线，两条触发路径：
 
-要出**正式签名包**，先在仓库 Settings → Secrets 里配置：
+- **推 `main`** → 自动构建，APK 以制品形式挂在 Actions 运行页（`tingshuge-debug-apk`，保留 90 天）
+- **推 `v*` 标签** → 自动构建并发布到 Releases，APK 有免登录直链
+
+发新版本的完整流程：
+
+```bash
+git tag v1.0.1 && git push origin v1.0.1
+```
+
+要出**正式签名包**，先在仓库 Settings → Secrets 里配置下面四项，流水线会自动多跑一个 release 步骤：
 
 | Secret | 内容 |
 | --- | --- |
@@ -160,10 +178,11 @@ keytool -genkey -v -keystore release.keystore -alias readaloud \
 
 ## 云端版本与当前进度
 
-这份文档是「听书阁」项目的云端主版本，之后的改动都会更新到这里。代码本身在本地 `readaloud/` 目录——资料库存的是说明文档与可分享的页面，不放可运行的 App 源码。
+这份文档是「听书阁」项目的云端主版本，之后的改动都会更新到这里。代码已托管在 GitHub：https://github.com/mutonglook/readaloud ，资料库这边放的是说明文档与可分享的页面。
 
 - **已完成**：书架、TXT/EPUB 解析、四套主题阅读、离线与在线双引擎朗读、后台通知栏控制、阅读进度记忆。前端完整流程已逐屏跑通验证。
-- **待验证**：原生 Java 部分（前台服务、通知栏、TTS 队列）还没有在真机上编译运行过。首次打包若报错，多半是 JDK 或 SDK 版本的小问题，把构建日志发出来即可定位。
+- **已通过编译**：原生 Java 部分（`ReadAloudService` 前台服务、`ReadAloudPlugin` 桥接、TTS 队列）已在 GitHub Actions 的 Ubuntu + JDK 21 + Android SDK 36 环境完整编译通过，产出可安装的 APK（v1.0.0）。
+- **待真机验证**：APK 的安装与后台朗读、通知栏控制、锁屏续读等运行时行为，需要在真机上实际跑一遍。
 - **待开发**：账号登录与云端同步，方案见上文「下一步」。
 
 最后更新：2026-11-03
