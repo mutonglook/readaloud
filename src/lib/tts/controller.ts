@@ -2,6 +2,7 @@ import type { Book, SpeakPosition, TtsSettings } from '../../types';
 import type { SpeakResult, TtsEngine } from './engine';
 import { WebSpeechEngine } from './webSpeech';
 import { OnlineTtsEngine } from './online';
+import { EdgeTtsEngine } from './edge';
 import { ReadAloud, isNative } from './native';
 import { buildChapterQueue, positionToIndex, type Utterance } from './queue';
 
@@ -14,8 +15,8 @@ export interface PlayerState {
   sentenceIndex: number;
   currentText: string;
   chapterTitle: string;
-  /** 当前模式：原生后台朗读 / 在线 AI 语音 / 浏览器内置 */
-  mode: 'native' | 'online' | 'web';
+  /** 当前模式：原生后台朗读 / 在线 AI 语音 / Edge 免费语音 / 浏览器内置 */
+  mode: 'native' | 'online' | 'edge' | 'web';
   error: string | null;
 }
 
@@ -50,6 +51,7 @@ export class SpeechController {
 
   private webEngine = new WebSpeechEngine();
   private onlineEngine: OnlineTtsEngine | null = null;
+  private edgeEngine = new EdgeTtsEngine();
   private settings: TtsSettings | null = null;
 
   /** 递增令牌：每次 stop/pause/seek 都让旧循环作废 */
@@ -97,12 +99,14 @@ export class SpeechController {
       model: settings.onlineModel,
       voice: settings.onlineVoice,
     });
+    this.edgeEngine.updateConfig({ voice: settings.edgeVoice });
     this.emit({ mode: this.pickMode() });
   }
 
   private pickMode(): PlayerState['mode'] {
     const provider = this.settings?.provider ?? 'native';
     if (provider === 'online') return 'online';
+    if (provider === 'edge') return 'edge';
     return isNative() && this.nativeReady ? 'native' : 'web';
   }
 
@@ -367,7 +371,7 @@ export class SpeechController {
           text: u.text,
           rate: this.settings?.rate ?? 1,
           pitch: this.settings?.pitch ?? 1,
-          voice: this.settings?.provider === 'online' ? this.settings.onlineVoice : this.settings?.nativeVoice,
+          voice: this.currentVoice(),
         });
       } catch (err) {
         const message = (err as Error).message || '语音朗读失败';
@@ -387,8 +391,19 @@ export class SpeechController {
     }
   }
 
+  /** 当前引擎该用哪个音色 */
+  private currentVoice(): string | undefined {
+    const s = this.settings;
+    if (!s) return undefined;
+    if (s.provider === 'online') return s.onlineVoice;
+    if (s.provider === 'edge') return s.edgeVoice;
+    return s.nativeVoice || undefined;
+  }
+
   private pickEngine(): TtsEngine | null {
-    if (this.settings?.provider === 'online') return this.onlineEngine;
+    const provider = this.settings?.provider;
+    if (provider === 'online') return this.onlineEngine;
+    if (provider === 'edge') return this.edgeEngine;
     return this.webEngine;
   }
 
@@ -412,22 +427,36 @@ export class SpeechController {
   /** 设置页试听：用当前引擎念一小段，不进入播放队列 */
   async preview(text: string): Promise<void> {
     await this.warmup();
-    if (this.settings?.provider === 'online' && this.onlineEngine) {
-      await this.onlineEngine.prepare();
-      await this.onlineEngine.speak({
+    const s = this.settings;
+
+    if (s?.provider === 'edge') {
+      await this.edgeEngine.prepare();
+      await this.edgeEngine.speak({
         text,
-        rate: this.settings.rate,
-        pitch: this.settings.pitch,
-        voice: this.settings.onlineVoice,
+        rate: s.rate ?? 1,
+        pitch: s.pitch ?? 1,
+        voice: s.edgeVoice,
       });
       return;
     }
+
+    if (s?.provider === 'online' && this.onlineEngine) {
+      await this.onlineEngine.prepare();
+      await this.onlineEngine.speak({
+        text,
+        rate: s.rate,
+        pitch: s.pitch,
+        voice: s.onlineVoice,
+      });
+      return;
+    }
+
     await this.webEngine.prepare();
     await this.webEngine.speak({
       text,
-      rate: this.settings?.rate ?? 1,
-      pitch: this.settings?.pitch ?? 1,
-      voice: this.settings?.nativeVoice || undefined,
+      rate: s?.rate ?? 1,
+      pitch: s?.pitch ?? 1,
+      voice: s?.nativeVoice || undefined,
     });
   }
 

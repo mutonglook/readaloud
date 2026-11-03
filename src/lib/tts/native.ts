@@ -21,6 +21,8 @@ export interface ReadAloudPlugin {
   stop(): Promise<void>;
   seek(options: { index: number }): Promise<void>;
   getState(): Promise<{ playing: boolean; index: number; size: number }>;
+  /** 沉浸式全屏：隐藏 / 显示状态栏与导航栏 */
+  setImmersive(options: { enabled: boolean }): Promise<void>;
 
   addListener(event: 'progress', cb: (d: { index: number; text: string }) => void): Promise<PluginListenerHandle>;
   addListener(event: 'state', cb: (d: { playing: boolean; index: number }) => void): Promise<PluginListenerHandle>;
@@ -41,8 +43,7 @@ export function getCachedVoices(): NativeVoice[] {
   return cachedVoices;
 }
 
-export async function initNativeTts(): Promise<{ available: boolean; voices: NativeVoice[] }> {
-  if (!isNative()) return { available: false, voices: [] };
+export async function initNativeTts(): Promise<{ available: boolean; voices: NativeVoice[] }> {  if (!isNative()) return { available: false, voices: [] };
   try {
     if (!bound) {
       bound = true;
@@ -59,5 +60,25 @@ export async function initNativeTts(): Promise<{ available: boolean; voices: Nat
   } catch (err) {
     console.warn('[native-tts] initialize failed', err);
     return { available: false, voices: [] };
+  }
+}
+
+/**
+ * 切换沉浸式全屏。
+ * 原生壳走 WindowInsetsController 隐藏系统栏；浏览器里降级为 Fullscreen API。
+ */
+export async function setImmersive(enabled: boolean): Promise<void> {
+  if (isNative()) {
+    await ReadAloud.setImmersive({ enabled });
+    return;
+  }
+  try {
+    if (enabled) {
+      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+    } else if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    }
+  } catch (err) {
+    console.warn('[immersive] browser fullscreen failed', err);
   }
 }

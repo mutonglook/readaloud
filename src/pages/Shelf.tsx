@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLibrary } from '../store/useLibrary';
 import type { BookMeta } from '../types';
-import { IconBook, IconPlus, IconSettings, IconTrash } from '../components/Icons';
+import { IconBook, IconClose, IconPlus, IconSearch, IconSettings, IconTrash } from '../components/Icons';
 
 interface ShelfProps {
   onOpen: (bookId: string) => void;
@@ -13,6 +13,7 @@ export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
   const { books, progress, loading, importing, error, refresh, importFile, remove, importSample } = useLibrary();
   const fileRef = useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState(false);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     void refresh();
@@ -57,13 +58,30 @@ export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
 
   const totalBooks = books.length;
 
+  // 搜索：书名、作者都参与匹配，输入即时过滤
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return books;
+    return books.filter(
+      (b) => b.title.toLowerCase().includes(q) || (b.author ?? '').toLowerCase().includes(q),
+    );
+  }, [books, query]);
+
+  const searching = query.trim().length > 0;
+
   return (
     <div className="shelf">
       <header className="shelf__header">
         <div>
           <h1 className="shelf__title">听书阁</h1>
           <div className="shelf__subtitle">
-            {loading ? '正在读取书架…' : totalBooks > 0 ? `${totalBooks} 本书 · 点开即可听` : '把书放进来，让眼睛休息一下'}
+            {loading
+              ? '正在读取书架…'
+              : searching
+                ? `找到 ${filtered.length} 本`
+                : totalBooks > 0
+                  ? `${totalBooks} 本书 · 点开即可听`
+                  : '把书放进来，让眼睛休息一下'}
           </div>
         </div>
         <div className="shelf__actions">
@@ -98,6 +116,28 @@ export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
         }}
       />
 
+      {totalBooks > 0 && (
+        <div className="search">
+          <span className="search__icon" aria-hidden="true">
+            <IconSearch size={18} />
+          </span>
+          <input
+            className="search__input"
+            type="search"
+            inputMode="search"
+            placeholder="搜索书名或作者"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="搜索书架"
+          />
+          {searching && (
+            <button className="search__clear" onClick={() => setQuery('')} aria-label="清空搜索">
+              <IconClose size={16} />
+            </button>
+          )}
+        </div>
+      )}
+
       {books.length === 0 && !loading ? (
         <div className="empty">
           <div className="empty__art">
@@ -124,8 +164,21 @@ export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
         </div>
       ) : (
         <div className="shelf__body">
-          <div className="book-grid">
-            {books.map((b, i) => {
+          {filtered.length === 0 && searching ? (
+            <div className="empty empty--search">
+              <div className="empty__title">没有匹配的书</div>
+              <p className="empty__desc">
+                换个关键词试试，
+                <br />
+                或者清空搜索看全部 {totalBooks} 本。
+              </p>
+              <button className="empty__cta" onClick={() => setQuery('')}>
+                清空搜索
+              </button>
+            </div>
+          ) : (
+            <div className="book-grid">
+              {filtered.map((b, i) => {
               const p = progress[b.id];
               const pct = p ? p.percent : 0;
               return (
@@ -180,7 +233,8 @@ export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
                 </div>
               );
             })}
-          </div>
+            </div>
+          )}
         </div>
       )}
 

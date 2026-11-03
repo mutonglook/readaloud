@@ -1,10 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSettings } from '../store/useSettings';
-import { initNativeTts, isNative, type NativeVoice } from '../lib/tts/native';
+import { initNativeTts, isNative, setImmersive, type NativeVoice } from '../lib/tts/native';
 import { listWebVoices } from '../lib/tts/webSpeech';
+import { EDGE_VOICES } from '../lib/tts/edge';
 import { speechController } from '../lib/tts/controller';
+import {
+  FONT_OPTIONS,
+  deleteCustomFont,
+  ensureCustomFont,
+  importCustomFont,
+  listCustomFonts,
+} from '../lib/fonts';
 import type { ThemeId } from '../types';
-import { IconBack, IconCloud, IconHeadphone } from '../components/Icons';
+import { IconBack, IconCloud, IconHeadphone, IconPlus, IconTrash } from '../components/Icons';
 
 interface SettingsProps {
   onBack: () => void;
@@ -22,6 +30,44 @@ export function Settings({ onBack, onToast }: SettingsProps) {
   const { reader, tts, setReader, setTts } = useSettings();
   const [nativeVoices, setNativeVoices] = useState<NativeVoice[]>([]);
   const [testing, setTesting] = useState(false);
+  const [customFonts, setCustomFonts] = useState<string[]>([]);
+  const [fontFamilies, setFontFamilies] = useState<Record<string, string>>({});
+  const fontInputRef = useRef<HTMLInputElement>(null);
+
+  // 载入用户导入过的字体并注册到 document.fonts
+  useEffect(() => {
+    void (async () => {
+      const list = await listCustomFonts();
+      setCustomFonts(list);
+      const map: Record<string, string> = {};
+      for (const name of list) {
+        const family = await ensureCustomFont(name);
+        if (family) map[name] = family;
+      }
+      setFontFamilies(map);
+    })();
+  }, []);
+
+  const handleImportFont = async (file?: File) => {
+    if (!file) return;
+    try {
+      const name = await importCustomFont(file);
+      const family = await ensureCustomFont(name);
+      setCustomFonts((l) => (l.includes(name) ? l : [...l, name]));
+      if (family) setFontFamilies((m) => ({ ...m, [name]: family }));
+      setReader({ fontFamily: 'custom', customFont: name });
+      onToast(`已导入字体「${name}」`);
+    } catch (err) {
+      onToast((err as Error).message);
+    }
+  };
+
+  const handleDeleteFont = async (name: string) => {
+    await deleteCustomFont(name);
+    setCustomFonts((l) => l.filter((n) => n !== name));
+    if (reader.customFont === name) setReader({ fontFamily: 'serif', customFont: undefined });
+    onToast('已删除字体');
+  };
 
   useEffect(() => {
     let alive = true;
@@ -128,15 +174,75 @@ export function Settings({ onBack, onToast }: SettingsProps) {
           <div className="field">
             <div className="field__label">
               <span>字体</span>
+              <span className="field__value">
+                {reader.fontFamily === 'custom' ? reader.customFont : FONT_OPTIONS.find((f) => f.id === reader.fontFamily)?.label}
+              </span>
             </div>
-            <div className="segmented">
-              <button className={reader.fontFamily === 'serif' ? 'active' : ''} onClick={() => setReader({ fontFamily: 'serif' })}>
-                宋体 · 适合长读
-              </button>
-              <button className={reader.fontFamily === 'sans' ? 'active' : ''} onClick={() => setReader({ fontFamily: 'sans' })}>
-                黑体 · 更清晰
-              </button>
+
+            <div className="font-grid">
+              {FONT_OPTIONS.map((f) => (
+                <button
+                  key={f.id}
+                  className={`font-chip${reader.fontFamily === f.id ? ' active' : ''}`}
+                  onClick={() => setReader({ fontFamily: f.id, customFont: undefined })}
+                  title={f.desc}
+                >
+                  <span className="font-chip__sample" style={{ fontFamily: f.stack }}>
+                    读书
+                  </span>
+                  <span className="font-chip__name">{f.label}</span>
+                </button>
+              ))}
+              {customFonts.map((name) => {
+                const active = reader.fontFamily === 'custom' && reader.customFont === name;
+                const family = fontFamilies[name];
+                return (
+                  <button
+                    key={name}
+                    className={`font-chip${active ? ' active' : ''}`}
+                    onClick={() => setReader({ fontFamily: 'custom', customFont: name })}
+                    title="导入的字体"
+                  >
+                    <span
+                      className="font-chip__sample"
+                      style={family ? { fontFamily: `"${family}"` } : undefined}
+                    >
+                      读书
+                    </span>
+                    <span className="font-chip__name">{name}</span>
+                  </button>
+                );
+              })}
             </div>
+
+            <div className="font-actions">
+              <button className="ghost-btn" onClick={() => fontInputRef.current?.click()}>
+                <IconPlus size={15} />
+                导入字体文件
+              </button>
+              {reader.fontFamily === 'custom' && reader.customFont && (
+                <button className="ghost-btn" onClick={() => void handleDeleteFont(reader.customFont!)}>
+                  <IconTrash size={14} />
+                  删除
+                </button>
+              )}
+            </div>
+
+            <div className="field__hint">
+              安卓设备通常只自带黑体与宋体，圆体 / 楷体 / 仿宋在部分手机上会自动回退成宋体。
+              想要真实字形，导入手机上已有的 .ttf 字体文件即可，字体只存在本机。
+            </div>
+
+            <input
+              ref={fontInputRef}
+              type="file"
+              accept=".ttf,.otf,.woff,.woff2"
+              hidden
+              onChange={(e) => {
+                void handleImportFont(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
           </div>
 
           <div className="switch-row">
@@ -145,6 +251,20 @@ export function Settings({ onBack, onToast }: SettingsProps) {
               className={`switch${reader.autoScroll ? ' on' : ''}`}
               onClick={() => setReader({ autoScroll: !reader.autoScroll })}
               aria-label="自动跟随"
+            >
+              <i />
+            </button>
+          </div>
+
+          <div className="switch-row">
+            <span>
+              全屏显示
+              <em className="switch-row__hint">隐藏状态栏与导航栏，阅读区域更大</em>
+            </span>
+            <button
+              className={`switch${reader.immersive ? ' on' : ''}`}
+              onClick={() => void setImmersive(!reader.immersive).then(() => setReader({ immersive: !reader.immersive }))}
+              aria-label="全屏显示"
             >
               <i />
             </button>
@@ -160,18 +280,23 @@ export function Settings({ onBack, onToast }: SettingsProps) {
               <span>朗读引擎</span>
               {!isNative() && <span className="field__value">浏览器预览模式</span>}
             </div>
-            <div className="segmented">
+            <div className="segmented segmented--3">
               <button className={tts.provider === 'native' ? 'active' : ''} onClick={() => setTts({ provider: 'native' })}>
                 离线朗读
               </button>
+              <button className={tts.provider === 'edge' ? 'active' : ''} onClick={() => setTts({ provider: 'edge' })}>
+                Edge 免费
+              </button>
               <button className={tts.provider === 'online' ? 'active' : ''} onClick={() => setTts({ provider: 'online' })}>
-                在线 AI 语音
+                在线 AI
               </button>
             </div>
             <div className="field__hint">
               {tts.provider === 'native'
                 ? '调用手机本地语音，无需联网、不花钱；装成 APK 后可锁屏后台朗读，通知栏能暂停和切句。'
-                : '音色更自然，接近真人。需要联网并消耗第三方接口额度；后台播放能力受系统限制，建议前台收听。'}
+                : tts.provider === 'edge'
+                  ? '微软 Edge 朗读的免费音色，无需 API Key，音色比系统 TTS 自然。需要联网；离开前台后可能被系统挂起，长时间收听建议用离线朗读。'
+                  : '音色更自然，接近真人。需要联网并消耗第三方接口额度；后台播放能力受系统限制，建议前台收听。'}
             </div>
           </div>
 
@@ -248,6 +373,30 @@ export function Settings({ onBack, onToast }: SettingsProps) {
                   没检测到可用音色。请到系统设置里安装「文字转语音」引擎（如讯飞语记、Google 语音服务）。
                 </div>
               )}
+            </div>
+          )}
+
+          {tts.provider === 'edge' && (
+            <div className="field">
+              <div className="field__label">
+                <span>音色</span>
+                <span className="field__value">{EDGE_VOICES.length} 个可选</span>
+              </div>
+              <div className="voice-grid">
+                {EDGE_VOICES.map((v) => (
+                  <button
+                    key={v.id}
+                    className={`voice-chip${tts.edgeVoice === v.id ? ' active' : ''}`}
+                    onClick={() => setTts({ edgeVoice: v.id })}
+                  >
+                    <span className="voice-chip__name">{v.name}</span>
+                    <span className="voice-chip__desc">{v.desc}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="field__hint">
+                全部免费、无需 Key。选好后点下方「试听当前音色」确认。若连不上，先检查手机时间是否准确，或改回离线朗读。
+              </div>
             </div>
           )}
 
@@ -345,7 +494,7 @@ export function Settings({ onBack, onToast }: SettingsProps) {
           <div className="panel__title">关于</div>
           <div className="stat-row">
             <span>版本</span>
-            <span>1.0.0</span>
+            <span>1.1.0</span>
           </div>
           <div className="stat-row">
             <span>书籍与进度</span>

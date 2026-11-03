@@ -17,6 +17,7 @@ export const defaultReader: ReaderSettings = {
   fontFamily: 'serif',
   padding: 22,
   autoScroll: true,
+  immersive: false,
 };
 
 export const defaultTts: TtsSettings = {
@@ -28,6 +29,7 @@ export const defaultTts: TtsSettings = {
   onlineApiKey: '',
   onlineModel: 'tts-1',
   onlineVoice: 'alloy',
+  edgeVoice: 'zh-CN-XiaoxiaoNeural',
   gapMs: 260,
 };
 
@@ -40,6 +42,20 @@ export const useSettings = create<SettingsState>()(
       setTts: (patch) => set((s) => ({ tts: { ...s.tts, ...patch } })),
       reset: () => set({ reader: defaultReader, tts: defaultTts }),
     }),
-    { name: 'readaloud-settings', version: 1 },
+    {
+      name: 'readaloud-settings',
+      version: 2,
+      // 老版本只有 serif/sans 两种字体，也没有沉浸式与 Edge 音色，
+      // 升级时用默认值补齐缺失字段，避免读取出 undefined
+      migrate: (persisted, version) => {
+        const state = persisted as Partial<SettingsState> | undefined;
+        if (!state || version >= 2) return state as SettingsState;
+        return {
+          ...state,
+          reader: { ...defaultReader, ...(state.reader ?? {}) },
+          tts: { ...defaultTts, ...(state.tts ?? {}) },
+        } as SettingsState;
+      },
+    },
   ),
 );

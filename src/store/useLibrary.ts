@@ -11,7 +11,7 @@ interface LibraryState {
   loading: boolean;
   importing: string | null;
   error: string | null;
-  refresh: () => Promise<void>;
+  refresh: (silent?: boolean) => Promise<void>;
   importFile: (file: File) => Promise<Book | null>;
   importMany: (files: File[]) => Promise<number>;
   remove: (id: string) => Promise<void>;
@@ -27,8 +27,9 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
   importing: null,
   error: null,
 
-  refresh: async () => {
-    set({ loading: true });
+  refresh: async (silent = false) => {
+    // silent 用于数据变更后的静默刷新：不闪 loading，界面直接换数据
+    if (!silent) set({ loading: true });
     const [books, list] = await Promise.all([db.listMeta(), db.listProgress()]);
     const progress: Record<string, ReadingProgress> = {};
     list.forEach((p) => (progress[p.bookId] = p));
@@ -74,7 +75,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
       if (book.totalChars < 10) throw new Error('文件内容为空或无法识别');
 
       await db.saveBook(book);
-      await get().refresh();
+      await get().refresh(true);
       set({ importing: null });
       return book;
     } catch (err) {
@@ -93,8 +94,14 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
   },
 
   remove: async (id) => {
+    // 先从界面移除，再落库：点击后立刻消失，不等 IO
+    set((s) => {
+      const progress = { ...s.progress };
+      delete progress[id];
+      return { books: s.books.filter((b) => b.id !== id), progress };
+    });
     await db.deleteBook(id);
-    await get().refresh();
+    await get().refresh(true);
   },
 
   loadBook: async (id) => db.getBook(id),
@@ -110,7 +117,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
   importSample: async () => {
     const book = buildSampleBook();
     await db.saveBook(book);
-    await get().refresh();
+    await get().refresh(true);
     return book;
   },
 }));
@@ -121,7 +128,7 @@ function scheduleRefresh(fn: () => Promise<void>) {
   refreshTimer = setTimeout(() => {
     refreshTimer = null;
     void fn();
-  }, 4000);
+  }, 800);
 }
 
 export const progressOf = (id: string, progress: Record<string, ReadingProgress>) => progress[id];
