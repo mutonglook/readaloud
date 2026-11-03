@@ -20,10 +20,11 @@ interface SettingsProps {
 }
 
 const THEMES: { id: ThemeId; label: string; bg: string; fg: string }[] = [
-  { id: 'paper', label: '纸质', bg: '#f6f1e7', fg: '#33302b' },
-  { id: 'eye', label: '护眼', bg: '#cfe6cf', fg: '#26382a' },
-  { id: 'parchment', label: '羊皮', bg: '#e8d9bd', fg: '#453322' },
-  { id: 'night', label: '夜间', bg: '#14140f', fg: '#b9b4a8' },
+  { id: 'white', label: '白底', bg: '#ffffff', fg: '#262626' },
+  { id: 'paper', label: '纸质', bg: '#f6f0e3', fg: '#36322a' },
+  { id: 'eye', label: '护眼', bg: '#cde6cd', fg: '#26382a' },
+  { id: 'parchment', label: '羊皮', bg: '#e9dcc3', fg: '#42331f' },
+  { id: 'night', label: '夜间', bg: '#121211', fg: '#9d9890' },
 ];
 
 export function Settings({ onBack, onToast }: SettingsProps) {
@@ -494,7 +495,7 @@ export function Settings({ onBack, onToast }: SettingsProps) {
           <div className="panel__title">关于</div>
           <div className="stat-row">
             <span>版本</span>
-            <span>1.1.0</span>
+            <span>1.2.0</span>
           </div>
           <div className="stat-row">
             <span>书籍与进度</span>
