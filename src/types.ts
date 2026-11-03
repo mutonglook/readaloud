@@ -42,18 +42,25 @@ export interface ReadingProgress {
 
 export type ThemeId = 'paper' | 'eye' | 'parchment' | 'night';
 
+/** 阅读字体档位：预设走系统字体栈，custom 走用户导入的字体文件 */
+export type FontId = 'serif' | 'sans' | 'round' | 'kai' | 'fangsong' | 'mono' | 'custom';
+
 export interface ReaderSettings {
   theme: ThemeId;
   fontSize: number;
   lineHeight: number;
-  fontFamily: 'serif' | 'sans';
+  fontFamily: FontId;
+  /** fontFamily === 'custom' 时使用的字体名 */
+  customFont?: string;
   /** 左右页边距，单位 px */
   padding: number;
   /** 朗读高亮跟随滚动 */
   autoScroll: boolean;
+  /** 沉浸式全屏：隐藏状态栏与导航栏 */
+  immersive: boolean;
 }
 
-export type TtsProvider = 'native' | 'online';
+export type TtsProvider = 'native' | 'online' | 'edge';
 
 export interface TtsSettings {
   provider: TtsProvider;
@@ -66,6 +73,8 @@ export interface TtsSettings {
   onlineApiKey: string;
   onlineModel: string;
   onlineVoice: string;
+  /** Edge 免费在线语音的音色 id */
+  edgeVoice: string;
   /** 每段朗读间隔，毫秒 */
   gapMs: number;
 }

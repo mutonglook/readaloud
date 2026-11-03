@@ -9,7 +9,7 @@ export interface SpeakRequest {
 }
 
 export interface TtsEngine {
-  readonly kind: 'web' | 'online' | 'native';
+  readonly kind: 'web' | 'online' | 'native' | 'edge';
   /** 预加载资源（在线引擎预热、原生引擎检查可用性） */
   prepare(): Promise<void>;
   /** 朗读一句，结束时 resolve */

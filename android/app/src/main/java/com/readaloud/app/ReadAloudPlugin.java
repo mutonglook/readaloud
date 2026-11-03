@@ -1,10 +1,14 @@
 package com.readaloud.app;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.os.Build;
 
 import androidx.core.app.ActivityCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -175,6 +179,43 @@ public class ReadAloudPlugin extends Plugin {
         ret.put("index", ReadAloudService.index);
         ret.put("size", ReadAloudService.QUEUE.size());
         call.resolve(ret);
+    }
+
+    /**
+     * 沉浸式全屏：隐藏 / 显示状态栏与导航栏。
+     * Android 15 起应用默认 edge-to-edge，这里只负责控制系统栏可见性。
+     */
+    @PluginMethod
+    public void setImmersive(PluginCall call) {
+        Boolean flag = call.getBoolean("enabled", Boolean.TRUE);
+        final boolean enabled = flag != null && flag;
+        final Activity activity = getActivity();
+
+        if (activity == null) {
+            call.resolve();
+            return;
+        }
+
+        activity.runOnUiThread(() -> {
+            try {
+                WindowCompat.setDecorFitsSystemWindows(activity.getWindow(), false);
+                WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(
+                        activity.getWindow(), activity.getWindow().getDecorView());
+
+                if (enabled) {
+                    controller.hide(WindowInsetsCompat.Type.systemBars());
+                    controller.setSystemBarsBehavior(
+                            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                } else {
+                    controller.show(WindowInsetsCompat.Type.systemBars());
+                    controller.setSystemBarsBehavior(
+                            WindowInsetsControllerCompat.BEHAVIOR_DEFAULT);
+                }
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("setImmersive failed: " + e.getMessage());
+            }
+        });
     }
 
     private void ensureNotificationPermission() {

@@ -1,7 +1,7 @@
 {
   "name": "readaloud",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "听书阁 - 支持 TXT/EPUB 阅读与语音朗读的 Android 应用",
   "scripts": {

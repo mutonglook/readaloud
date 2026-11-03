@@ -4,9 +4,13 @@ import { useLibrary } from '../store/useLibrary';
 import { useSettings } from '../store/useSettings';
 import { splitSentences } from '../lib/splitter';
 import { speechController } from '../lib/tts/controller';
+import { setImmersive } from '../lib/tts/native';
+import { FONT_OPTIONS, resolveFontStack } from '../lib/fonts';
 import { usePlayerState } from '../hooks/usePlayerState';
 import {
   IconBack,
+  IconCollapse,
+  IconExpand,
   IconList,
   IconNext,
   IconPause,
@@ -31,6 +35,18 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
   const [chapterIndex, setChapterIndex] = useState(0);
   const [tocOpen, setTocOpen] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false);
+  const [fontStack, setFontStack] = useState<string>(FONT_OPTIONS[0].stack);
+
+  // 字体可能是导入的自定义字体文件，需要先注册再拿 family
+  useEffect(() => {
+    let alive = true;
+    void resolveFontStack(reader.fontFamily, reader.customFont).then((stack) => {
+      if (alive) setFontStack(stack);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [reader.fontFamily, reader.customFont]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const activeSpanRef = useRef<HTMLSpanElement | null>(null);
@@ -213,7 +229,7 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
           ['--reader-font-size' as string]: `${reader.fontSize}px`,
           ['--reader-line-height' as string]: String(reader.lineHeight),
           ['--reader-padding' as string]: `${reader.padding}px`,
-          ['--reader-font' as string]: reader.fontFamily === 'serif' ? 'var(--font-serif)' : 'var(--font-sans)',
+          ['--reader-font' as string]: fontStack,
         }}
       >
         <div className="reader__inner">
@@ -248,7 +264,13 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
         <div className="player-bar">
           <div className="player-bar__head">
             <span className="player-bar__badge">
-              {player.mode === 'native' ? '后台朗读' : player.mode === 'online' ? 'AI 语音' : '系统语音'}
+              {player.mode === 'native'
+                ? '后台朗读'
+                : player.mode === 'edge'
+                  ? 'Edge 语音'
+                  : player.mode === 'online'
+                    ? 'AI 语音'
+                    : '系统语音'}
             </span>
             <span className="player-bar__text">{player.currentText || '准备中…'}</span>
           </div>
@@ -417,14 +439,52 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
                 />
               </div>
 
-              <div className="segmented" style={{ marginBottom: 20 }}>
-                <button className={reader.fontFamily === 'serif' ? 'active' : ''} onClick={() => setReader({ fontFamily: 'serif' })}>
-                  宋体
-                </button>
-                <button className={reader.fontFamily === 'sans' ? 'active' : ''} onClick={() => setReader({ fontFamily: 'sans' })}>
-                  黑体
+              <div className="field">
+                <div className="field__label">
+                  <span>字体</span>
+                  <span className="field__value">
+                    {reader.fontFamily === 'custom' ? reader.customFont : FONT_OPTIONS.find((f) => f.id === reader.fontFamily)?.label}
+                  </span>
+                </div>
+                <div className="font-grid font-grid--compact">
+                  {FONT_OPTIONS.map((f) => (
+                    <button
+                      key={f.id}
+                      className={`font-chip${reader.fontFamily === f.id ? ' active' : ''}`}
+                      onClick={() => setReader({ fontFamily: f.id, customFont: undefined })}
+                    >
+                      <span className="font-chip__sample" style={{ fontFamily: f.stack }}>
+                        读书
+                      </span>
+                      <span className="font-chip__name">{f.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="switch-row">
+                <span>全屏显示</span>
+                <button
+                  className={`switch${reader.immersive ? ' on' : ''}`}
+                  onClick={() =>
+                    void setImmersive(!reader.immersive).then(() => setReader({ immersive: !reader.immersive }))
+                  }
+                  aria-label="全屏显示"
+                >
+                  <i />
                 </button>
               </div>
+
+              <button
+                className="ghost-btn"
+                style={{ marginBottom: 20 }}
+                onClick={() =>
+                  void setImmersive(!reader.immersive).then(() => setReader({ immersive: !reader.immersive }))
+                }
+              >
+                {reader.immersive ? <IconCollapse size={16} /> : <IconExpand size={16} />}
+                {reader.immersive ? '退出全屏' : '进入全屏'}
+              </button>
             </div>
           </div>
         </>

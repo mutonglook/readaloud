@@ -106,3 +106,35 @@ export const IconCloud = ({ size = 20, strokeWidth = 1.7 }: IconProps) => (
     <path d="M17.5 19H7a4.5 4.5 0 01-.7-8.95 6 6 0 0111.6-1.4A4 4 0 0117.5 19z" />
   </svg>
 );
+
+export const IconSearch = ({ size = 20, strokeWidth = 1.8 }: IconProps) => (
+  <svg {...base(size)} strokeWidth={strokeWidth}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="M16 16l4.5 4.5" />
+  </svg>
+);
+
+export const IconClose = ({ size = 18, strokeWidth = 1.9 }: IconProps) => (
+  <svg {...base(size)} strokeWidth={strokeWidth}>
+    <path d="M6 6l12 12M18 6L6 18" />
+  </svg>
+);
+
+export const IconExpand = ({ size = 20, strokeWidth = 1.8 }: IconProps) => (
+  <svg {...base(size)} strokeWidth={strokeWidth}>
+    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+  </svg>
+);
+
+export const IconCollapse = ({ size = 20, strokeWidth = 1.8 }: IconProps) => (
+  <svg {...base(size)} strokeWidth={strokeWidth}>
+    <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+  </svg>
+);
+
+export const IconFont = ({ size = 20, strokeWidth = 1.8 }: IconProps) => (
+  <svg {...base(size)} strokeWidth={strokeWidth}>
+    <path d="M4 19l6-14 6 14M6.5 14h7" />
+    <path d="M17 19V9M15 11l2-2 2 2" />
+  </svg>
+);

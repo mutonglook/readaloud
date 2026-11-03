@@ -88,3 +88,59 @@
 [data-theme='night'] .player-bar {
   background: rgba(31, 31, 25, 0.92);
 }
+
+/* ---------- M3 Expressive 扩展令牌 ----------
+   三套色调（primary / secondary / tertiary）+ 毛玻璃底色。
+   单独成块，避免改动上面四套主题的原始配色。 */
+
+:root {
+  --radius-xs: 10px;
+  --radius-sm: 14px;
+  --radius-md: 20px;
+  --radius-lg: 28px;
+  --radius-pill: 999px;
+
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.56, 1);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 160ms;
+  --dur-base: 260ms;
+  --dur-slow: 420ms;
+
+  --touch-min: 44px;
+}
+
+[data-theme='paper'] {
+  --accent-2: #6d7a5a;
+  --accent-3: #a8563f;
+  --on-accent: #fffdf8;
+  --glass: rgba(255, 253, 248, 0.7);
+  --glass-strong: rgba(255, 253, 248, 0.86);
+  --glass-line: rgba(120, 95, 65, 0.12);
+}
+
+[data-theme='eye'] {
+  --accent-2: #4a6b52;
+  --accent-3: #8a6a3a;
+  --on-accent: #f3faf2;
+  --glass: rgba(226, 240, 224, 0.7);
+  --glass-strong: rgba(226, 240, 224, 0.88);
+  --glass-line: rgba(50, 80, 58, 0.14);
+}
+
+[data-theme='parchment'] {
+  --accent-2: #6b5a3a;
+  --accent-3: #9a4f33;
+  --on-accent: #faf1de;
+  --glass: rgba(242, 231, 210, 0.7);
+  --glass-strong: rgba(242, 231, 210, 0.88);
+  --glass-line: rgba(110, 82, 50, 0.16);
+}
+
+[data-theme='night'] {
+  --accent-2: #8a9a7a;
+  --accent-3: #c97b5b;
+  --on-accent: #14140f;
+  --glass: rgba(31, 31, 25, 0.72);
+  --glass-strong: rgba(31, 31, 25, 0.9);
+  --glass-line: rgba(220, 210, 190, 0.1);
+}

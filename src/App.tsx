@@ -4,13 +4,14 @@ import { Reader } from './pages/Reader';
 import { Settings } from './pages/Settings';
 import { useSettings } from './store/useSettings';
 import { speechController } from './lib/tts/controller';
-import { isNative } from './lib/tts/native';
+import { isNative, setImmersive } from './lib/tts/native';
 import { App as CapApp } from '@capacitor/app';
 
 type View = 'shelf' | 'reader' | 'settings';
 
 export default function App() {
   const theme = useSettings((s) => s.reader.theme);
+  const immersive = useSettings((s) => s.reader.immersive);
   const tts = useSettings((s) => s.tts);
   const [view, setView] = useState<View>('shelf');
   const [prevView, setPrevView] = useState<View>('shelf');
@@ -34,6 +35,13 @@ export default function App() {
   useEffect(() => {
     speechController.applySettings(tts);
   }, [tts]);
+
+  // 启动时恢复上次的全屏状态（设置页里切换时也会走这里）
+  useEffect(() => {
+    void setImmersive(immersive);
+    if (immersive) document.documentElement.dataset.immersive = 'on';
+    else delete document.documentElement.dataset.immersive;
+  }, [immersive]);
 
   // 原生端：从后台回到前台时同步播放状态（通知栏可能改过播放/暂停）
   useEffect(() => {
