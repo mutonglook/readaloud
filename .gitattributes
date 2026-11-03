@@ -1,0 +1,26 @@
+# 默认交由 git 自动识别文本文件
+* text=auto
+
+# Linux CI 上必须保持 LF，否则 shell 脚本无法执行
+*.sh      text eol=lf
+gradlew   text eol=lf
+*.gradle  text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+
+# Windows 侧脚本
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# 二进制
+*.jar     binary
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.webp    binary
+*.ico     binary
+*.keystore binary
+*.jks     binary
+*.ttf     binary
+*.woff    binary
+*.woff2   binary

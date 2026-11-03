@@ -1,0 +1,90 @@
+/* 四套阅读主题：纸质 / 护眼 / 羊皮 / 夜间
+   全部走 CSS 变量，切换主题时整站配色一起变 */
+
+:root {
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", Georgia, serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  --shadow-card: 0 1px 2px rgba(60, 45, 30, 0.06), 0 8px 24px -12px rgba(60, 45, 30, 0.28);
+  --shadow-float: 0 8px 32px -8px rgba(40, 30, 20, 0.32);
+}
+
+/* 纸质：暖白米黄，最接近实体书 */
+[data-theme='paper'] {
+  --bg: #f6f1e7;
+  --bg-soft: #efe8db;
+  --surface: #fffdf8;
+  --surface-2: #f9f4ea;
+  --text: #33302b;
+  --text-soft: #5d564c;
+  --text-muted: #948b7e;
+  --accent: #9a6b3f;
+  --accent-soft: rgba(154, 107, 63, 0.1);
+  --line: rgba(120, 95, 65, 0.14);
+  --hl: rgba(206, 150, 66, 0.26);
+  --hl-strong: rgba(206, 150, 66, 0.42);
+  --shadow-tint: rgba(60, 45, 30, 0.08);
+}
+
+/* 护眼：豆沙绿，长时间看不累 */
+[data-theme='eye'] {
+  --bg: #cfe6cf;
+  --bg-soft: #c2ddc4;
+  --surface: #e2f0e0;
+  --surface-2: #d6e8d6;
+  --text: #26382a;
+  --text-soft: #3d5342;
+  --text-muted: #6d8371;
+  --accent: #3f6b48;
+  --accent-soft: rgba(63, 107, 72, 0.12);
+  --line: rgba(50, 80, 58, 0.16);
+  --hl: rgba(120, 168, 110, 0.34);
+  --hl-strong: rgba(120, 168, 110, 0.5);
+  --shadow-tint: rgba(30, 55, 35, 0.1);
+}
+
+/* 羊皮：仿旧纸，暖褐 */
+[data-theme='parchment'] {
+  --bg: #e8d9bd;
+  --bg-soft: #ddcaa9;
+  --surface: #f2e7d2;
+  --surface-2: #ecdfc6;
+  --text: #453322;
+  --text-soft: #5f4a34;
+  --text-muted: #8d7658;
+  --accent: #8a5a2b;
+  --accent-soft: rgba(138, 90, 43, 0.13);
+  --line: rgba(110, 82, 50, 0.2);
+  --hl: rgba(178, 128, 62, 0.3);
+  --hl-strong: rgba(178, 128, 62, 0.46);
+  --shadow-tint: rgba(70, 50, 28, 0.12);
+}
+
+/* 夜间：低亮度深灰，护眼不刺眼 */
+[data-theme='night'] {
+  --bg: #14140f;
+  --bg-soft: #1b1b16;
+  --surface: #1f1f19;
+  --surface-2: #262620;
+  --text: #b9b4a8;
+  --text-soft: #948f84;
+  --text-muted: #6c675e;
+  --accent: #c99a5b;
+  --accent-soft: rgba(201, 154, 91, 0.14);
+  --line: rgba(220, 210, 190, 0.1);
+  --hl: rgba(201, 154, 91, 0.2);
+  --hl-strong: rgba(201, 154, 91, 0.34);
+  --shadow-tint: rgba(0, 0, 0, 0.5);
+}
+
+/* 播放控制条在夜间也要可读 */
+[data-theme='night'] .player-bar {
+  background: rgba(31, 31, 25, 0.92);
+}
