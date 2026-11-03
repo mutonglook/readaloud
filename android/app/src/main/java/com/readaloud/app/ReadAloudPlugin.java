@@ -92,8 +92,7 @@ public class ReadAloudPlugin extends Plugin {
         ReadAloudService.QUEUE.clear();
         if (arr != null) {
             for (int i = 0; i < arr.length(); i++) {
-                String s = arr.getString(i);
-                ReadAloudService.QUEUE.add(s == null ? "" : s);
+                ReadAloudService.QUEUE.add(arr.optString(i, ""));
             }
         }
 
@@ -112,8 +111,7 @@ public class ReadAloudPlugin extends Plugin {
         JSArray arr = call.getArray("queue");
         if (arr != null) {
             for (int i = 0; i < arr.length(); i++) {
-                String s = arr.getString(i);
-                ReadAloudService.QUEUE.add(s == null ? "" : s);
+                ReadAloudService.QUEUE.add(arr.optString(i, ""));
             }
         }
         call.resolve();
