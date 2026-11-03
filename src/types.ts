@@ -40,25 +40,39 @@ export interface ReadingProgress {
   updatedAt: number;
 }
 
-export type ThemeId = 'paper' | 'eye' | 'parchment' | 'night';
+export type ThemeId = 'white' | 'paper' | 'eye' | 'parchment' | 'night';
 
 /** 阅读字体档位：预设走系统字体栈，custom 走用户导入的字体文件 */
 export type FontId = 'serif' | 'sans' | 'round' | 'kai' | 'fangsong' | 'mono' | 'custom';
+
+/** 翻页方式：平移 / 无动画 / 上下滚动 */
+export type PageMode = 'slide' | 'none' | 'flow';
 
 export interface ReaderSettings {
   theme: ThemeId;
   fontSize: number;
   lineHeight: number;
+  /** 段间距，单位 em */
+  paragraphGap: number;
+  /** 字重 */
+  weight: number;
   fontFamily: FontId;
   /** fontFamily === 'custom' 时使用的字体名 */
   customFont?: string;
   /** 左右页边距，单位 px */
   padding: number;
+  /** 翻页方式 */
+  pageMode: PageMode;
+  /** 屏幕亮度 0.4 ~ 1 */
+  brightness: number;
   /** 朗读高亮跟随滚动 */
   autoScroll: boolean;
   /** 沉浸式全屏：隐藏状态栏与导航栏 */
   immersive: boolean;
 }
+
+/** 书架视图：网格 / 列表 */
+export type ShelfView = 'grid' | 'list';
 
 export type TtsProvider = 'native' | 'online' | 'edge';
 

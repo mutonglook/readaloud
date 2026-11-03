@@ -13,9 +13,13 @@ interface SettingsState {
 export const defaultReader: ReaderSettings = {
   theme: 'paper',
   fontSize: 18,
-  lineHeight: 1.9,
+  lineHeight: 1.85,
+  paragraphGap: 0.7,
+  weight: 400,
   fontFamily: 'serif',
   padding: 22,
+  pageMode: 'slide',
+  brightness: 1,
   autoScroll: true,
   immersive: false,
 };
@@ -44,12 +48,12 @@ export const useSettings = create<SettingsState>()(
     }),
     {
       name: 'readaloud-settings',
-      version: 2,
-      // 老版本只有 serif/sans 两种字体，也没有沉浸式与 Edge 音色，
-      // 升级时用默认值补齐缺失字段，避免读取出 undefined
+      version: 3,
+      // 老版本只有 serif/sans 两种字体，也没有沉浸式、Edge 音色、翻页方式等字段，
+      // 升级时用默认值补齐缺失项，避免读取出 undefined
       migrate: (persisted, version) => {
         const state = persisted as Partial<SettingsState> | undefined;
-        if (!state || version >= 2) return state as SettingsState;
+        if (!state || version >= 3) return state as SettingsState;
         return {
           ...state,
           reader: { ...defaultReader, ...(state.reader ?? {}) },

@@ -1,146 +1,113 @@
-/* 四套阅读主题：纸质 / 护眼 / 羊皮 / 夜间
-   全部走 CSS 变量，切换主题时整站配色一起变 */
+/* ==========================================================================
+   设计令牌
+   参考掌阅 iReader 的分层：App 外壳恒为浅色，只有阅读页正文随"阅读背景"变化。
+   因此这里拆成两套变量：:root（外壳）与 .rd[data-theme]（阅读页作用域）。
+   ========================================================================== */
 
 :root {
-  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", Georgia, serif;
-  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  /* 品牌色：掌阅的橙红 */
+  --brand: #ff5a1f;
+  --brand-deep: #e64a12;
+  --brand-soft: #fff2ec;
 
-  --radius-sm: 8px;
-  --radius-md: 14px;
-  --radius-lg: 22px;
+  /* 外壳（始终浅色，不随阅读主题变化） */
+  --app-bg: #ffffff;
+  --app-bg-soft: #f6f6f7;
+  --app-bg-sink: #efeff1;
+  --app-text: #171717;
+  --app-text-2: #5f5f5f;
+  --app-text-3: #9b9b9b;
+  --app-line: #ededed;
+  --app-line-strong: #e0e0e0;
+  --app-mask: rgba(0, 0, 0, 0.42);
 
+  /* 圆角：掌阅偏方正，不用 M3 的大圆角 */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-pill: 999px;
+
+  /* 阴影 */
+  --sd-card: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --sd-cover: 0 3px 10px rgba(0, 0, 0, 0.14), 0 1px 2px rgba(0, 0, 0, 0.08);
+  --sd-float: 0 -2px 16px rgba(0, 0, 0, 0.08);
+
+  /* 动效 */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 140ms;
+  --dur: 220ms;
+  --dur-slow: 320ms;
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC',
+    'Source Han Sans SC', 'Microsoft YaHei', sans-serif;
+  --font-serif: 'Songti SC', 'Noto Serif CJK SC', 'Source Han Serif SC', 'STZhongsong',
+    'SimSun', serif;
+
+  /* 安全区 */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-
-  --shadow-card: 0 1px 2px rgba(60, 45, 30, 0.06), 0 8px 24px -12px rgba(60, 45, 30, 0.28);
-  --shadow-float: 0 8px 32px -8px rgba(40, 30, 20, 0.32);
-}
-
-/* 纸质：暖白米黄，最接近实体书 */
-[data-theme='paper'] {
-  --bg: #f6f1e7;
-  --bg-soft: #efe8db;
-  --surface: #fffdf8;
-  --surface-2: #f9f4ea;
-  --text: #33302b;
-  --text-soft: #5d564c;
-  --text-muted: #948b7e;
-  --accent: #9a6b3f;
-  --accent-soft: rgba(154, 107, 63, 0.1);
-  --line: rgba(120, 95, 65, 0.14);
-  --hl: rgba(206, 150, 66, 0.26);
-  --hl-strong: rgba(206, 150, 66, 0.42);
-  --shadow-tint: rgba(60, 45, 30, 0.08);
-}
-
-/* 护眼：豆沙绿，长时间看不累 */
-[data-theme='eye'] {
-  --bg: #cfe6cf;
-  --bg-soft: #c2ddc4;
-  --surface: #e2f0e0;
-  --surface-2: #d6e8d6;
-  --text: #26382a;
-  --text-soft: #3d5342;
-  --text-muted: #6d8371;
-  --accent: #3f6b48;
-  --accent-soft: rgba(63, 107, 72, 0.12);
-  --line: rgba(50, 80, 58, 0.16);
-  --hl: rgba(120, 168, 110, 0.34);
-  --hl-strong: rgba(120, 168, 110, 0.5);
-  --shadow-tint: rgba(30, 55, 35, 0.1);
-}
-
-/* 羊皮：仿旧纸，暖褐 */
-[data-theme='parchment'] {
-  --bg: #e8d9bd;
-  --bg-soft: #ddcaa9;
-  --surface: #f2e7d2;
-  --surface-2: #ecdfc6;
-  --text: #453322;
-  --text-soft: #5f4a34;
-  --text-muted: #8d7658;
-  --accent: #8a5a2b;
-  --accent-soft: rgba(138, 90, 43, 0.13);
-  --line: rgba(110, 82, 50, 0.2);
-  --hl: rgba(178, 128, 62, 0.3);
-  --hl-strong: rgba(178, 128, 62, 0.46);
-  --shadow-tint: rgba(70, 50, 28, 0.12);
-}
-
-/* 夜间：低亮度深灰，护眼不刺眼 */
-[data-theme='night'] {
-  --bg: #14140f;
-  --bg-soft: #1b1b16;
-  --surface: #1f1f19;
-  --surface-2: #262620;
-  --text: #b9b4a8;
-  --text-soft: #948f84;
-  --text-muted: #6c675e;
-  --accent: #c99a5b;
-  --accent-soft: rgba(201, 154, 91, 0.14);
-  --line: rgba(220, 210, 190, 0.1);
-  --hl: rgba(201, 154, 91, 0.2);
-  --hl-strong: rgba(201, 154, 91, 0.34);
-  --shadow-tint: rgba(0, 0, 0, 0.5);
-}
-
-/* 播放控制条在夜间也要可读 */
-[data-theme='night'] .player-bar {
-  background: rgba(31, 31, 25, 0.92);
-}
-
-/* ---------- M3 Expressive 扩展令牌 ----------
-   三套色调（primary / secondary / tertiary）+ 毛玻璃底色。
-   单独成块，避免改动上面四套主题的原始配色。 */
-
-:root {
-  --radius-xs: 10px;
-  --radius-sm: 14px;
-  --radius-md: 20px;
-  --radius-lg: 28px;
-  --radius-pill: 999px;
-
-  --ease-spring: cubic-bezier(0.34, 1.4, 0.56, 1);
-  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  --dur-fast: 160ms;
-  --dur-base: 260ms;
-  --dur-slow: 420ms;
-
   --touch-min: 44px;
+
+  /* 阅读页兜底（未设置 data-theme 时按纸质） */
+  --rd-bg: #f6f0e3;
+  --rd-text: #36322a;
+  --rd-sub: #8d8678;
+  --rd-line: rgba(0, 0, 0, 0.1);
+  --rd-accent: #c26a2a;
 }
 
-[data-theme='paper'] {
-  --accent-2: #6d7a5a;
-  --accent-3: #a8563f;
-  --on-accent: #fffdf8;
-  --glass: rgba(255, 253, 248, 0.7);
-  --glass-strong: rgba(255, 253, 248, 0.86);
-  --glass-line: rgba(120, 95, 65, 0.12);
+/* ==========================  阅读页主题（作用域）  ========================== */
+
+.rd[data-theme='white'] {
+  --rd-bg: #ffffff;
+  --rd-text: #262626;
+  --rd-sub: #9a9a9a;
+  --rd-line: rgba(0, 0, 0, 0.07);
+  --rd-accent: #ff5a1f;
+  --rd-hl: rgba(255, 138, 61, 0.14);
+  --rd-hl-strong: rgba(255, 138, 61, 0.26);
 }
 
-[data-theme='eye'] {
-  --accent-2: #4a6b52;
-  --accent-3: #8a6a3a;
-  --on-accent: #f3faf2;
-  --glass: rgba(226, 240, 224, 0.7);
-  --glass-strong: rgba(226, 240, 224, 0.88);
-  --glass-line: rgba(50, 80, 58, 0.14);
+.rd[data-theme='paper'] {
+  --rd-bg: #f6f0e3;
+  --rd-text: #36322a;
+  --rd-sub: #8d8678;
+  --rd-line: rgba(0, 0, 0, 0.08);
+  --rd-accent: #c26a2a;
+  --rd-hl: rgba(190, 120, 40, 0.13);
+  --rd-hl-strong: rgba(190, 120, 40, 0.24);
 }
 
-[data-theme='parchment'] {
-  --accent-2: #6b5a3a;
-  --accent-3: #9a4f33;
-  --on-accent: #faf1de;
-  --glass: rgba(242, 231, 210, 0.7);
-  --glass-strong: rgba(242, 231, 210, 0.88);
-  --glass-line: rgba(110, 82, 50, 0.16);
+.rd[data-theme='eye'] {
+  --rd-bg: #cde6cd;
+  --rd-text: #26382a;
+  --rd-sub: #6b7f6d;
+  --rd-line: rgba(0, 0, 0, 0.1);
+  --rd-accent: #3f7a4d;
+  --rd-hl: rgba(46, 110, 62, 0.14);
+  --rd-hl-strong: rgba(46, 110, 62, 0.26);
 }
 
-[data-theme='night'] {
-  --accent-2: #8a9a7a;
-  --accent-3: #c97b5b;
-  --on-accent: #14140f;
-  --glass: rgba(31, 31, 25, 0.72);
-  --glass-strong: rgba(31, 31, 25, 0.9);
-  --glass-line: rgba(220, 210, 190, 0.1);
+.rd[data-theme='parchment'] {
+  --rd-bg: #e9dcc3;
+  --rd-text: #42331f;
+  --rd-sub: #8a7657;
+  --rd-line: rgba(0, 0, 0, 0.1);
+  --rd-accent: #9c5c25;
+  --rd-hl: rgba(140, 90, 30, 0.16);
+  --rd-hl-strong: rgba(140, 90, 30, 0.28);
+}
+
+.rd[data-theme='night'] {
+  --rd-bg: #121211;
+  --rd-text: #9d9890;
+  --rd-sub: #6b6862;
+  --rd-line: rgba(255, 255, 255, 0.09);
+  --rd-accent: #d08a4a;
+  --rd-hl: rgba(208, 138, 74, 0.16);
+  --rd-hl-strong: rgba(208, 138, 74, 0.3);
 }

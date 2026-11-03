@@ -1,19 +1,42 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLibrary } from '../store/useLibrary';
-import type { BookMeta } from '../types';
-import { IconBook, IconClose, IconPlus, IconSearch, IconSettings, IconTrash } from '../components/Icons';
+import type { BookMeta, ShelfView } from '../types';
+import {
+  IconBook,
+  IconCheck,
+  IconClose,
+  IconGrid,
+  IconPlus,
+  IconRows,
+  IconSearch,
+  IconTrash,
+} from '../components/Icons';
 
 interface ShelfProps {
   onOpen: (bookId: string) => void;
-  onOpenSettings: () => void;
   onToast: (msg: string) => void;
 }
 
-export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
-  const { books, progress, loading, importing, error, refresh, importFile, remove, importSample } = useLibrary();
+type FilterKey = 'all' | 'reading' | 'done';
+
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'reading', label: '在读' },
+  { key: 'done', label: '已读' },
+];
+
+export function Shelf({ onOpen, onToast }: ShelfProps) {
+  const { books, progress, loading, importing, error, refresh, importFile, remove, importSample } =
+    useLibrary();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [editing, setEditing] = useState(false);
   const [query, setQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [filter, setFilter] = useState<FilterKey>('all');
+  const [view, setView] = useState<ShelfView>('grid');
+  // 管理模式：长按书封进入，多选删除
+  const [managing, setManaging] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     void refresh();
@@ -32,8 +55,6 @@ export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
       onToast('请选择 .txt 或 .epub 文件');
       return;
     }
-
-    // 单本导入后直接进阅读器，少一次点击
     if (list.length === 1) {
       const book = await importFile(list[0]);
       if (book) {
@@ -42,7 +63,6 @@ export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
       }
       return;
     }
-
     let ok = 0;
     for (const f of list) {
       if (await importFile(f)) ok++;
@@ -50,57 +70,125 @@ export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
     if (ok > 0) onToast(`已导入 ${ok} 本书`);
   };
 
-  const handleDelete = async (book: BookMeta) => {
-    if (!window.confirm(`确定从书架移除《${book.title}》？\n本地阅读进度也会一并清除。`)) return;
-    await remove(book.id);
-    onToast('已移除');
-  };
+  const pctOf = (id: string) => progress[id]?.percent ?? 0;
 
-  const totalBooks = books.length;
+  // 最近在读的一本
+  const recent = useMemo(() => {
+    const read = books
+      .filter((b) => pctOf(b.id) > 0 && pctOf(b.id) < 100)
+      .sort((a, b) => (b.lastReadAt ?? 0) - (a.lastReadAt ?? 0));
+    return read[0] ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [books, progress]);
 
-  // 搜索：书名、作者都参与匹配，输入即时过滤
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return books;
-    return books.filter(
-      (b) => b.title.toLowerCase().includes(q) || (b.author ?? '').toLowerCase().includes(q),
-    );
-  }, [books, query]);
+    let list = books;
+    if (q) {
+      list = list.filter(
+        (b) => b.title.toLowerCase().includes(q) || (b.author ?? '').toLowerCase().includes(q),
+      );
+    }
+    if (filter === 'reading') list = list.filter((b) => pctOf(b.id) > 0 && pctOf(b.id) < 100);
+    if (filter === 'done') list = list.filter((b) => pctOf(b.id) >= 100);
+    return list;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [books, progress, query, filter]);
 
   const searching = query.trim().length > 0;
 
+  /* ------------------------------ 管理模式 ------------------------------ */
+
+  const startPress = (id: string) => {
+    pressTimer.current = setTimeout(() => {
+      setManaging(true);
+      setSelected(new Set([id]));
+      // 触发一次轻震动，手感对齐原生
+      navigator.vibrate?.(12);
+    }, 460);
+  };
+
+  const cancelPress = () => {
+    if (pressTimer.current) {
+      clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const exitManage = () => {
+    setManaging(false);
+    setSelected(new Set());
+  };
+
+  const handleOpen = (b: BookMeta) => {
+    if (managing) {
+      toggleSelect(b.id);
+      return;
+    }
+    onOpen(b.id);
+  };
+
+  const selectAll = () => {
+    if (selected.size === filtered.length) setSelected(new Set());
+    else setSelected(new Set(filtered.map((b) => b.id)));
+  };
+
+  const removeSelected = async () => {
+    if (selected.size === 0) return;
+    if (!window.confirm(`确定移除选中的 ${selected.size} 本书？\n本地阅读进度也会一并清除。`)) return;
+    const ids = Array.from(selected);
+    exitManage();
+    for (const id of ids) await remove(id);
+    onToast(`已移除 ${ids.length} 本`);
+  };
+
+  /* ------------------------------ 渲染 ------------------------------ */
+
+  const cover = (b: BookMeta, cls: string) => (
+    <div className={cls}>
+      {b.cover ? <img src={b.cover} alt="" /> : <span>{b.title}</span>}
+    </div>
+  );
+
   return (
-    <div className="shelf">
-      <header className="shelf__header">
-        <div>
-          <h1 className="shelf__title">听书阁</h1>
-          <div className="shelf__subtitle">
-            {loading
-              ? '正在读取书架…'
-              : searching
-                ? `找到 ${filtered.length} 本`
-                : totalBooks > 0
-                  ? `${totalBooks} 本书 · 点开即可听`
-                  : '把书放进来，让眼睛休息一下'}
-          </div>
-        </div>
-        <div className="shelf__actions">
-          {totalBooks > 0 && (
+    <div className="sh">
+      <header className="sh__top">
+        <h1 className="sh__title">{managing ? `已选 ${selected.size} 本` : '书架'}</h1>
+        <div className="sh__tools">
+          {!managing && (
+            <>
+              <button
+                className="icon-btn"
+                onClick={() => {
+                  setSearchOpen((v) => !v);
+                  if (searchOpen) setQuery('');
+                }}
+                aria-label="搜索书架"
+              >
+                {searchOpen ? <IconClose size={19} /> : <IconSearch size={19} />}
+              </button>
+              <button className="icon-btn" onClick={pickFiles} aria-label="导入书籍">
+                <IconPlus />
+              </button>
+            </>
+          )}
+          {managing && (
             <button
-              className="icon-btn"
-              onClick={() => setEditing((v) => !v)}
-              aria-label={editing ? '完成' : '管理书架'}
-              style={{ fontSize: 12, width: 'auto', padding: '0 10px', color: editing ? 'var(--accent)' : undefined }}
+              onClick={exitManage}
+              style={{ padding: '0 12px', fontSize: 14, color: 'var(--brand)' }}
             >
-              {editing ? '完成' : '管理'}
+              完成
             </button>
           )}
-          <button className="icon-btn" onClick={onOpenSettings} aria-label="设置">
-            <IconSettings />
-          </button>
-          <button className="icon-btn" onClick={pickFiles} aria-label="导入书籍">
-            <IconPlus />
-          </button>
         </div>
       </header>
 
@@ -116,15 +204,15 @@ export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
         }}
       />
 
-      {totalBooks > 0 && (
+      {searchOpen && (
         <div className="search">
           <span className="search__icon" aria-hidden="true">
-            <IconSearch size={18} />
+            <IconSearch size={17} />
           </span>
           <input
             className="search__input"
             type="search"
-            inputMode="search"
+            autoFocus
             placeholder="搜索书名或作者"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -132,16 +220,69 @@ export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
           />
           {searching && (
             <button className="search__clear" onClick={() => setQuery('')} aria-label="清空搜索">
-              <IconClose size={16} />
+              <IconClose size={13} />
             </button>
           )}
+        </div>
+      )}
+
+      {/* 最近阅读：掌阅首页的"继续阅读"入口 */}
+      {recent && !searching && filter === 'all' && !managing && (
+        <div className="recent" onClick={() => onOpen(recent.id)}>
+          <div className="recent__cover">
+            {recent.cover ? <img src={recent.cover} alt="" /> : <span>{recent.title}</span>}
+          </div>
+          <div className="recent__info">
+            <div className="recent__label">继续阅读</div>
+            <div className="recent__title">{recent.title}</div>
+            <div className="recent__sub">
+              {progress[recent.id]?.chapterIndex != null
+                ? `读到第 ${(progress[recent.id]?.chapterIndex ?? 0) + 1} 章 · ${pctOf(recent.id)}%`
+                : `共 ${recent.chapterCount} 章`}
+            </div>
+          </div>
+          <button className="recent__btn" onClick={() => onOpen(recent.id)}>
+            继续
+          </button>
+        </div>
+      )}
+
+      {books.length > 0 && (
+        <div className="sh__bar">
+          <div className="chips">
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                className={`chip${filter === f.key ? ' active' : ''}`}
+                onClick={() => setFilter(f.key)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="view-toggle">
+            <button
+              className={view === 'grid' ? 'on' : ''}
+              onClick={() => setView('grid')}
+              aria-label="封面视图"
+            >
+              <IconGrid />
+            </button>
+            <button
+              className={view === 'list' ? 'on' : ''}
+              onClick={() => setView('list')}
+              aria-label="列表视图"
+            >
+              <IconRows />
+            </button>
+          </div>
         </div>
       )}
 
       {books.length === 0 && !loading ? (
         <div className="empty">
           <div className="empty__art">
-            <IconBook size={124} />
+            <IconBook size={110} />
           </div>
           <div className="empty__title">书架还是空的</div>
           <p className="empty__desc">
@@ -153,7 +294,13 @@ export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
             导入第一本书
           </button>
           <button
-            style={{ marginTop: 14, fontSize: 13, color: 'var(--text-muted)', textDecoration: 'underline', textUnderlineOffset: 4 }}
+            style={{
+              marginTop: 14,
+              fontSize: 13,
+              color: 'var(--app-text-3)',
+              textDecoration: 'underline',
+              textUnderlineOffset: 4,
+            }}
             onClick={async () => {
               const b = await importSample();
               onOpen(b.id);
@@ -162,79 +309,112 @@ export function Shelf({ onOpen, onOpenSettings, onToast }: ShelfProps) {
             手边没书？先读个示例
           </button>
         </div>
-      ) : (
-        <div className="shelf__body">
-          {filtered.length === 0 && searching ? (
-            <div className="empty empty--search">
-              <div className="empty__title">没有匹配的书</div>
-              <p className="empty__desc">
+      ) : filtered.length === 0 ? (
+        <div className="empty">
+          <div className="empty__title">{searching ? '没有匹配的书' : '这里还没有书'}</div>
+          <p className="empty__desc">
+            {searching ? (
+              <>
                 换个关键词试试，
                 <br />
-                或者清空搜索看全部 {totalBooks} 本。
-              </p>
-              <button className="empty__cta" onClick={() => setQuery('')}>
-                清空搜索
-              </button>
-            </div>
-          ) : (
-            <div className="book-grid">
-              {filtered.map((b, i) => {
-              const p = progress[b.id];
-              const pct = p ? p.percent : 0;
-              return (
-                <div
-                  className="book-card"
-                  key={b.id}
-                  style={{ animationDelay: `${Math.min(i * 26, 260)}ms` }}
-                  onClick={() => (editing ? undefined : onOpen(b.id))}
-                >
-                  <div className="book-cover">
-                    {b.cover ? (
-                      <img src={b.cover} alt="" />
-                    ) : (
-                      <div className="book-cover__text">{b.title}</div>
-                    )}
-                    {editing && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleDelete(b);
-                        }}
-                        style={{
-                          position: 'absolute',
-                          top: 6,
-                          right: 6,
-                          width: 28,
-                          height: 28,
-                          borderRadius: '50%',
-                          background: 'rgba(180,60,40,.92)',
-                          color: '#fff',
-                          display: 'grid',
-                          placeItems: 'center',
-                          zIndex: 3,
-                        }}
-                        aria-label="删除"
-                      >
-                        <IconTrash size={15} />
-                      </button>
-                    )}
-                  </div>
-                  <div className="book-card__meta">
-                    <div className="book-card__name">{b.title}</div>
-                    <div className="book-card__author">
-                      {b.author} · {b.chapterCount} 章
+                或者清空搜索看全部 {books.length} 本。
+              </>
+            ) : (
+              <>当前筛选下没有内容，切到「全部」看看。</>
+            )}
+          </p>
+          <button
+            className="empty__cta"
+            onClick={() => {
+              setQuery('');
+              setFilter('all');
+            }}
+          >
+            查看全部
+          </button>
+        </div>
+      ) : view === 'grid' ? (
+        <div className="grid">
+          {filtered.map((b, i) => {
+            const pct = pctOf(b.id);
+            const on = selected.has(b.id);
+            return (
+              <div
+                className="bk"
+                key={b.id}
+                style={{ animationDelay: `${Math.min(i * 22, 240)}ms` }}
+                onClick={() => handleOpen(b)}
+                onPointerDown={() => startPress(b.id)}
+                onPointerUp={cancelPress}
+                onPointerMove={cancelPress}
+                onPointerCancel={cancelPress}
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                <div className="bk__cover">
+                  {b.cover ? (
+                    <img src={b.cover} alt="" />
+                  ) : (
+                    <div className="bk__cover-text">{b.title}</div>
+                  )}
+                  {pct > 0 && !managing && <div className="bk__badge">{pct}%</div>}
+                  {managing && (
+                    <div className={`bk__sel${on ? ' on' : ''}`}>
+                      <IconCheck size={12} />
                     </div>
-                    {pct > 0 && (
-                      <div className="book-card__progress">
-                        <i style={{ width: `${pct}%` }} />
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </div>
-              );
-            })}
-            </div>
-          )}
+                <div className="bk__title">{b.title}</div>
+                <div className="bk__meta">
+                  {b.author} · {b.chapterCount} 章
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="list">
+          {filtered.map((b) => {
+            const pct = pctOf(b.id);
+            return (
+              <div className="row" key={b.id} onClick={() => handleOpen(b)}>
+                {cover(b, 'row__cover')}
+                <div className="row__main">
+                  <div className="row__title">{b.title}</div>
+                  <div className="row__sub">
+                    {b.author} ·{' '}
+                    {progress[b.id]
+                      ? `读到第 ${(progress[b.id]?.chapterIndex ?? 0) + 1} 章`
+                      : `共 ${b.chapterCount} 章`}
+                  </div>
+                  {pct > 0 && (
+                    <div className="row__pct">
+                      <i style={{ width: `${pct}%` }} />
+                    </div>
+                  )}
+                </div>
+                {managing ? (
+                  <div className={`bk__sel${selected.has(b.id) ? ' on' : ''}`} style={{ position: 'static' }}>
+                    <IconCheck size={12} />
+                  </div>
+                ) : (
+                  <span className="row__chev" aria-hidden="true">
+                    ›
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {managing && (
+        <div className="manage">
+          <button onClick={selectAll}>
+            {selected.size === filtered.length && filtered.length > 0 ? '取消全选' : '全选'}
+          </button>
+          <button className="danger" onClick={() => void removeSelected()} disabled={selected.size === 0}>
+            <IconTrash size={15} /> 删除
+          </button>
         </div>
       )}
 
