@@ -82,6 +82,15 @@ jobs:
           mkdir -p out
           cp android/app/build/outputs/apk/debug/app-debug.apk "out/tingshuge-${{ github.run_number }}.apk"
 
+      - name: Verify APK
+        run: |
+          APK=$(ls out/*.apk | head -1)
+          ls -lh "$APK"
+          echo "--- 关键内容 ---"
+          unzip -l "$APK" | grep -E "AndroidManifest.xml|assets/public/index.html|classes[0-9]*\.dex" || true
+          echo "--- 条目总数 ---"
+          unzip -l "$APK" | tail -1
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
