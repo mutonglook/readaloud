@@ -6,11 +6,14 @@ export interface Chapter {
   paragraphs: string[];
 }
 
+/** 支持的电子书格式：纯文本系与 EPUB/PDF */
+export type BookFormat = 'txt' | 'epub' | 'html' | 'md' | 'docx' | 'fb2' | 'pdf';
+
 export interface Book {
   id: string;
   title: string;
   author: string;
-  format: 'txt' | 'epub';
+  format: BookFormat;
   /** 封面 dataURL，可缺省 */
   cover?: string;
   chapters: Chapter[];
@@ -23,7 +26,7 @@ export interface BookMeta {
   id: string;
   title: string;
   author: string;
-  format: 'txt' | 'epub';
+  format: BookFormat;
   cover?: string;
   chapterCount: number;
   totalChars: number;

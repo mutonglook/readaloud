@@ -46,6 +46,7 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
     public static final String CMD_PREV = "com.readaloud.app.cmd.PREV";
     public static final String CMD_STOP = "com.readaloud.app.cmd.STOP";
     public static final String CMD_SEEK = "com.readaloud.app.cmd.SEEK";
+    public static final String CMD_PREVIEW = "com.readaloud.app.cmd.PREVIEW";
 
     private static final String CHANNEL_ID = "readaloud_playback";
     private static final int NOTIFICATION_ID = 1001;
@@ -59,7 +60,11 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
     public static String voiceId = null;
     public static String bookTitle = "听书阁";
     public static String chapterTitle = "";
-    public static Listener listener = null;
+    /** 试听用的一次性文本，不进队列、不推进进度 */
+    public static String previewText = null;
+    private static Listener listener = null;
+    /** 缓存的音色列表：插件晚于服务初始化时也要能补发，否则前端永远拿不到音色 */
+    private static String lastVoicesJson = "[]";
 
     public interface Listener {
         void onProgress(int index, String text);
@@ -78,6 +83,7 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
     private TextToSpeech tts;
     private boolean ttsReady = false;
     private boolean ttsFailed = false;
+    private boolean languageOk = true;
     private String pendingAction = null;
     private int utteranceSeq = 0;
     private PowerManager.WakeLock wakeLock;
@@ -90,13 +96,50 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
         return instance;
     }
 
+    /** 绑定 JS 侧监听，并立刻把已缓存的音色补发一次 */
+    public static void setListener(Listener l) {
+        listener = l;
+        if (l != null && lastVoicesJson != null) {
+            l.onVoices(lastVoicesJson);
+        }
+    }
+
+    public static String getVoicesJson() {
+        return lastVoicesJson;
+    }
+
+    public static boolean isTtsReady() {
+        return instance != null && instance.ttsReady;
+    }
+
+    public static boolean isTtsFailed() {
+        return instance != null && instance.ttsFailed;
+    }
+
+    /** 前端主动要音色：服务若已就绪就重发一次 */
+    public static void requestVoices() {
+        if (instance != null && instance.ttsReady) {
+            instance.emitVoices();
+        }
+    }
+
     public static void sendCommand(Context context, String action) {
         Intent intent = new Intent(context, ReadAloudService.class);
         intent.setAction(action);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent);
-        } else {
-            context.startService(intent);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent);
+            } else {
+                context.startService(intent);
+            }
+        } catch (Exception e) {
+            // Android 12+ 在后台禁止启动前台服务，退化用 startService；仍失败就放弃本次命令
+            Log.w(TAG, "startForegroundService failed, fallback to startService", e);
+            try {
+                context.startService(intent);
+            } catch (Exception ignored) {
+                Log.w(TAG, "startService also failed", ignored);
+            }
         }
     }
 
@@ -134,6 +177,9 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
             tts = null;
         }
         ttsReady = false;
+        ttsFailed = false;
+        languageOk = true;
+        lastVoicesJson = "[]";
         super.onDestroy();
     }
 
@@ -152,11 +198,17 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
             return;
         }
 
+        // 中文优先，逐级回退；国产 ROM 上有时候只有 Locale.CHINA 被接受
         int langResult = tts.setLanguage(Locale.SIMPLIFIED_CHINESE);
         if (langResult == TextToSpeech.LANG_MISSING_DATA || langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
-            // 退而求其次用默认语言，至少能出声
-            tts.setLanguage(Locale.getDefault());
+            langResult = tts.setLanguage(Locale.CHINA);
         }
+        if (langResult == TextToSpeech.LANG_MISSING_DATA || langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+            // 还不行就退回默认语言，至少能出声
+            langResult = tts.setLanguage(Locale.getDefault());
+        }
+        languageOk = langResult != TextToSpeech.LANG_MISSING_DATA
+                && langResult != TextToSpeech.LANG_NOT_SUPPORTED;
 
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
             @Override
@@ -183,6 +235,11 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
         ttsReady = true;
         emitVoices();
 
+        // 一个中英文音色都没有，基本可以断定系统没装语音引擎或缺少语言包
+        if ("[]".equals(lastVoicesJson) && !languageOk) {
+            emitError("系统里没有可用的中文语音，请先在设置中安装「文字转语音」引擎");
+        }
+
         if (pendingAction != null) {
             String a = pendingAction;
             pendingAction = null;
@@ -191,7 +248,7 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
     }
 
     private void emitVoices() {
-        if (listener == null || tts == null) return;
+        if (tts == null) return;
         try {
             Set<Voice> voices = tts.getVoices();
             StringBuilder sb = new StringBuilder("[");
@@ -203,15 +260,36 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
                     if (!(lang.startsWith("zh") || lang.startsWith("en"))) continue;
                     if (!first) sb.append(',');
                     sb.append("{\"id\":\"").append(escape(v.getName())).append("\",\"name\":\"")
-                            .append(escape(v.getName())).append("\",\"lang\":\"").append(escape(lang)).append("\"}");
+                            .append(escape(friendlyName(v))).append("\",\"lang\":\"").append(escape(lang)).append("\"}");
                     first = false;
                 }
             }
             sb.append("]");
-            listener.onVoices(sb.toString());
+            lastVoicesJson = sb.toString();
+            if (listener != null) {
+                listener.onVoices(lastVoicesJson);
+            }
         } catch (Exception e) {
             Log.w(TAG, "emitVoices failed", e);
         }
+    }
+
+    /**
+     * 音色在系统里的名字经常是一串包名式 ID（如 zh-cn-x-ccc-local），
+     * 这里挑出可读的那一段给用户看。
+     */
+    private static String friendlyName(Voice v) {
+        String name = v.getName() == null ? "" : v.getName();
+        String[] parts = name.split("[-_#]");
+        StringBuilder sb = new StringBuilder();
+        for (String p : parts) {
+            if (p.isEmpty()) continue;
+            // 形如 x-ccc-local / network 的标记跳过
+            if (p.length() <= 2 || "local".equalsIgnoreCase(p) || "network".equalsIgnoreCase(p)) continue;
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(p);
+        }
+        return sb.length() > 0 ? sb.toString() : name;
     }
 
     private static String escape(String s) {
@@ -229,6 +307,8 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
                 updateNotification();
                 emitState();
                 emitProgress();
+                // 只为取音色而启动的服务没必要常驻通知，退出前台，播放时再回来
+                stopForegroundCompat();
                 break;
 
             case CMD_PLAY:
@@ -243,6 +323,7 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
                 }
                 if (index < 0 || index >= QUEUE.size()) index = 0;
                 playing = true;
+                goForeground();
                 acquireWakeLock();
                 speakCurrent();
                 break;
@@ -279,6 +360,15 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
                 releaseWakeLock();
                 updateNotification();
                 emitState();
+                break;
+
+            case CMD_PREVIEW:
+                if (!ttsReady) {
+                    pendingAction = CMD_PREVIEW;
+                    ensureTts();
+                    return;
+                }
+                speakPreview();
                 break;
 
             default:
@@ -344,6 +434,23 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
         armWatchdog(text);
     }
 
+    /** 设置页试听：只念这一句，不动队列、不动进度、不改通知 */
+    private void speakPreview() {
+        if (tts == null || !ttsReady) return;
+        String text = previewText;
+        if (text == null || text.trim().isEmpty()) {
+            emitError("试听文本为空");
+            return;
+        }
+        applyVoiceAndTempo();
+        Bundle params = new Bundle();
+        params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1f);
+        int r = tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "pv" + (utteranceSeq++));
+        if (r != TextToSpeech.SUCCESS) {
+            emitError("语音引擎拒绝了这次试听，可能是音色不可用");
+        }
+    }
+
     private void applyVoiceAndTempo() {
         if (tts == null) return;
         try {
@@ -396,6 +503,8 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
 
     private void onUtteranceDone(String utteranceId) {
         clearWatchdog();
+        // 试听音频结束，不推进队列
+        if (utteranceId != null && utteranceId.startsWith("pv")) return;
         if (!playing) return;
         index++;
         if (index >= QUEUE.size()) {
@@ -411,6 +520,10 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
 
     private void onUtteranceError(String utteranceId, String message) {
         clearWatchdog();
+        if (utteranceId != null && utteranceId.startsWith("pv")) {
+            emitError(message + "（试听失败）");
+            return;
+        }
         emitError(message);
         // 跳过这一句，继续往下读，避免整本书卡死
         if (playing) {
@@ -540,6 +653,21 @@ public class ReadAloudService extends Service implements TextToSpeech.OnInitList
             }
         } catch (Exception e) {
             Log.e(TAG, "startForeground failed", e);
+        }
+    }
+
+    /** 退出前台并撤掉通知：只初始化不播放时用，避免通知栏常驻一条「正在朗读」 */
+    private void stopForegroundCompat() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE);
+            } else {
+                stopForeground(true);
+            }
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancel(NOTIFICATION_ID);
+        } catch (Exception e) {
+            Log.w(TAG, "stopForeground failed", e);
         }
     }
 

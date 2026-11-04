@@ -7,9 +7,25 @@ export interface NativeVoice {
   lang: string;
 }
 
+/** 后台运行相关的系统状态，设置页用来说明为什么会被杀 */
+export interface NativeStatus {
+  sdk: number;
+  notifications: boolean;
+  batteryWhitelisted: boolean;
+  ttsEngines: number;
+  ttsReady: boolean;
+  ttsFailed: boolean;
+  voices: string;
+  manufacturer: string;
+}
+
 export interface ReadAloudPlugin {
   /** 启动前台服务；音色列表稍后通过 voices 事件下发 */
-  initialize(): Promise<{ available: boolean }>;
+  initialize(): Promise<{ available: boolean; engineCount?: number; voices?: string }>;
+  /** 主动拉音色：服务比插件先初始化完时靠它补齐 */
+  getVoices(): Promise<{ voices: string; ready: boolean; failed: boolean; engineCount: number }>;
+  /** 试听一句，不进朗读队列 */
+  preview(options: { text: string; rate: number; pitch: number; voice?: string }): Promise<void>;
   /** 投递本章朗读队列并定位到起始句 */
   loadQueue(options: { queue: string[]; startIndex: number; title: string; subtitle: string }): Promise<void>;
   append(options: { queue: string[] }): Promise<void>;
@@ -23,6 +39,13 @@ export interface ReadAloudPlugin {
   getState(): Promise<{ playing: boolean; index: number; size: number }>;
   /** 沉浸式全屏：隐藏 / 显示状态栏与导航栏 */
   setImmersive(options: { enabled: boolean }): Promise<void>;
+  /** ColorOS 适配：系统状态 / 权限申请 / 各设置页跳转 */
+  checkStatus(): Promise<NativeStatus>;
+  requestNotificationPermission(): Promise<void>;
+  requestBatteryWhitelist(): Promise<void>;
+  openAppSettings(): Promise<void>;
+  openTtsSettings(): Promise<void>;
+  openAutoStart(): Promise<void>;
 
   addListener(event: 'progress', cb: (d: { index: number; text: string }) => void): Promise<PluginListenerHandle>;
   addListener(event: 'state', cb: (d: { playing: boolean; index: number }) => void): Promise<PluginListenerHandle>;
@@ -39,27 +62,72 @@ export const isNative = () => Capacitor.isNativePlatform();
 let cachedVoices: NativeVoice[] = [];
 let bound = false;
 
+function parseVoices(json?: string): NativeVoice[] {
+  if (!json) return [];
+  try {
+    const arr = JSON.parse(json) as NativeVoice[];
+    return Array.isArray(arr) ? arr.filter((v) => v && v.id) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function getCachedVoices(): NativeVoice[] {
   return cachedVoices;
 }
 
-export async function initNativeTts(): Promise<{ available: boolean; voices: NativeVoice[] }> {  if (!isNative()) return { available: false, voices: [] };
+/** 绑定 voices 事件，后续系统换了引擎也能立刻反映到列表 */
+async function bindVoiceListener() {
+  if (bound || !isNative()) return;
+  bound = true;
+  await ReadAloud.addListener('voices', (d) => {
+    const list = parseVoices(d.voices);
+    if (list.length) cachedVoices = list;
+  });
+}
+
+export async function initNativeTts(): Promise<{
+  available: boolean;
+  voices: NativeVoice[];
+  engineCount: number;
+}> {
+  if (!isNative()) return { available: false, voices: [], engineCount: 0 };
   try {
-    if (!bound) {
-      bound = true;
-      await ReadAloud.addListener('voices', (d) => {
-        try {
-          cachedVoices = JSON.parse(d.voices);
-        } catch {
-          /* 忽略解析失败 */
-        }
-      });
-    }
+    await bindVoiceListener();
     const res = await ReadAloud.initialize();
-    return { available: res.available, voices: cachedVoices };
+    const list = parseVoices(res.voices);
+    if (list.length) cachedVoices = list;
+    return { available: res.available, voices: cachedVoices, engineCount: res.engineCount ?? 0 };
   } catch (err) {
     console.warn('[native-tts] initialize failed', err);
-    return { available: false, voices: [] };
+    return { available: false, voices: [], engineCount: 0 };
+  }
+}
+
+/** 主动拉一次音色（服务就绪后才会返回内容） */
+export async function fetchNativeVoices(): Promise<{
+  voices: NativeVoice[];
+  ready: boolean;
+  engineCount: number;
+}> {
+  if (!isNative()) return { voices: [], ready: false, engineCount: 0 };
+  try {
+    await bindVoiceListener();
+    const res = await ReadAloud.getVoices();
+    const list = parseVoices(res.voices);
+    if (list.length) cachedVoices = list;
+    return { voices: cachedVoices, ready: res.ready, engineCount: res.engineCount ?? 0 };
+  } catch {
+    return { voices: cachedVoices, ready: false, engineCount: 0 };
+  }
+}
+
+export async function checkNativeStatus(): Promise<NativeStatus | null> {
+  if (!isNative()) return null;
+  try {
+    return await ReadAloud.checkStatus();
+  } catch {
+    return null;
   }
 }
 

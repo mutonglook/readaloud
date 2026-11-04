@@ -2,8 +2,14 @@ package com.readaloud.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
+import android.provider.Settings;
 
 import androidx.core.app.ActivityCompat;
 import androidx.core.view.WindowCompat;
@@ -64,28 +70,58 @@ public class ReadAloudPlugin extends Plugin {
                 notifyListeners("error", o);
             }
         };
-        ReadAloudService.listener = bridge;
+        ReadAloudService.setListener(bridge);
     }
 
     @Override
     protected void handleOnDestroy() {
         // Activity 销毁时解绑，服务本身继续在后台跑
-        if (ReadAloudService.listener == bridge) {
-            ReadAloudService.listener = null;
-        }
+        ReadAloudService.setListener(null);
         super.handleOnDestroy();
     }
 
     /** 启动服务并返回是否可用；音色列表稍后通过 voices 事件下发 */
     @PluginMethod
     public void initialize(PluginCall call) {
-        ReadAloudService.listener = bridge;
+        ReadAloudService.setListener(bridge);
         ReadAloudService.sendCommand(getContext(), ReadAloudService.CMD_LOAD);
 
         JSObject ret = new JSObject();
         ret.put("available", true);
-        ret.put("voices", new JSArray());
+        ret.put("engineCount", countTtsEngines());
+        ret.put("voices", ReadAloudService.getVoicesJson());
         call.resolve(ret);
+    }
+
+    /** 前端主动拉音色（服务可能比插件先初始化完，靠这个补齐） */
+    @PluginMethod
+    public void getVoices(PluginCall call) {
+        ReadAloudService.requestVoices();
+        JSObject ret = new JSObject();
+        ret.put("voices", ReadAloudService.getVoicesJson());
+        ret.put("ready", ReadAloudService.isTtsReady());
+        ret.put("failed", ReadAloudService.isTtsFailed());
+        ret.put("engineCount", countTtsEngines());
+        call.resolve(ret);
+    }
+
+    /**
+     * 试听：直接交给服务念一句，不进队列。
+     * 以前这一步在 WebView 里走 speechSynthesis，安卓 WebView 没有这个 API，
+     * 于是必然报「当前环境不支持语音朗读」。
+     */
+    @PluginMethod
+    public void preview(PluginCall call) {
+        Double r = call.getDouble("rate");
+        Double p = call.getDouble("pitch");
+        ReadAloudService.rate = r == null ? 1f : r.floatValue();
+        ReadAloudService.pitch = p == null ? 1f : p.floatValue();
+        ReadAloudService.voiceId = call.getString("voice", null);
+        ReadAloudService.previewText = call.getString("text", "你好，我是听书阁，正在为你朗读。");
+
+        ReadAloudService.setListener(bridge);
+        ReadAloudService.sendCommand(getContext(), ReadAloudService.CMD_PREVIEW);
+        call.resolve();
     }
 
     @PluginMethod
@@ -105,7 +141,7 @@ public class ReadAloudPlugin extends Plugin {
         ReadAloudService.bookTitle = call.getString("title", "听书阁");
         ReadAloudService.chapterTitle = call.getString("subtitle", "");
 
-        ReadAloudService.listener = bridge;
+        ReadAloudService.setListener(bridge);
         ReadAloudService.sendCommand(getContext(), ReadAloudService.CMD_LOAD);
         call.resolve();
     }
@@ -129,7 +165,7 @@ public class ReadAloudPlugin extends Plugin {
         ReadAloudService.pitch = p == null ? 1f : p.floatValue();
         ReadAloudService.voiceId = call.getString("voice", null);
 
-        ReadAloudService.listener = bridge;
+        ReadAloudService.setListener(bridge);
         ReadAloudService.sendCommand(getContext(), ReadAloudService.CMD_PLAY);
         call.resolve();
     }
@@ -228,6 +264,143 @@ public class ReadAloudPlugin extends Plugin {
                     getActivity(),
                     new String[] { Manifest.permission.POST_NOTIFICATIONS },
                     9101);
+        }
+    }
+
+    /* ------------------------- 后台运行 / ColorOS 适配 ------------------------- */
+
+    /** 系统里装了几个文字转语音引擎（ColorOS 出厂常常一个都没有） */
+    private int countTtsEngines() {
+        try {
+            Intent probe = new Intent("android.intent.action.TTS_SERVICE");
+            return getContext().getPackageManager().queryIntentServices(probe, 0).size();
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private boolean hasNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true;
+        return ActivityCompat.checkSelfPermission(
+                getContext(), Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean isIgnoringBattery() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+        try {
+            PowerManager pm = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+            return pm != null && pm.isIgnoringBatteryOptimizations(getContext().getPackageName());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 设置页「后台朗读守护」用的状态快照 */
+    @PluginMethod
+    public void checkStatus(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("sdk", Build.VERSION.SDK_INT);
+        ret.put("notifications", hasNotificationPermission());
+        ret.put("batteryWhitelisted", isIgnoringBattery());
+        ret.put("ttsEngines", countTtsEngines());
+        ret.put("ttsReady", ReadAloudService.isTtsReady());
+        ret.put("ttsFailed", ReadAloudService.isTtsFailed());
+        ret.put("voices", ReadAloudService.getVoicesJson());
+        ret.put("manufacturer", Build.MANUFACTURER == null ? "" : Build.MANUFACTURER);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestNotificationPermission(PluginCall call) {
+        ensureNotificationPermission();
+        call.resolve();
+    }
+
+    /** 申请忽略电池优化：ColorOS 的「耗电保护」不关，锁屏几分钟就被冻结 */
+    @PluginMethod
+    public void requestBatteryWhitelist(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIgnoringBattery()) {
+            try {
+                Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+                if (launch(intent)) {
+                    call.resolve();
+                    return;
+                }
+            } catch (Exception ignored) {
+                // 部分 ROM 不支持直接申请，退到电池优化列表
+            }
+            try {
+                launch(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            } catch (Exception ignored) {
+            }
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+            launch(intent);
+        } catch (Exception ignored) {
+        }
+        call.resolve();
+    }
+
+    /** 跳到系统「文字转语音」输出设置，让用户装/选语音引擎 */
+    @PluginMethod
+    public void openTtsSettings(PluginCall call) {
+        String[] actions = new String[] {
+                "com.android.settings.TTS_SETTINGS",
+                Settings.ACTION_ACCESSIBILITY_SETTINGS,
+                Settings.ACTION_SETTINGS,
+        };
+        for (String a : actions) {
+            try {
+                if (launch(new Intent(a))) {
+                    call.resolve();
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        call.resolve();
+    }
+
+    /** ColorOS / realme UI 的自启动管理页，各家包名不同，逐个试 */
+    @PluginMethod
+    public void openAutoStart(PluginCall call) {
+        String[][] candidates = new String[][] {
+                { "com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity" },
+                { "com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity" },
+                { "com.oplus.safecenter", "com.oplus.safecenter.permission.startup.StartupAppListActivity" },
+                { "com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity" },
+                { "com.coloros.oppoguardelf", "com.coloros.powermanager.fuelgaue.PowerUsageModelActivity" },
+        };
+        for (String[] c : candidates) {
+            try {
+                Intent intent = new Intent();
+                intent.setComponent(new ComponentName(c[0], c[1]));
+                if (launch(intent)) {
+                    call.resolve();
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        // 都没找到就退到应用详情页，用户可以在里面找权限管理
+        openAppSettings(call);
+    }
+
+    private boolean launch(Intent intent) {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            getContext().startActivity(intent);
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 }

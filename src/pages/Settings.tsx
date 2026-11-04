@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSettings } from '../store/useSettings';
-import { initNativeTts, isNative, setImmersive, type NativeVoice } from '../lib/tts/native';
+import {
+  ReadAloud,
+  checkNativeStatus,
+  fetchNativeVoices,
+  initNativeTts,
+  isNative,
+  setImmersive,
+  type NativeStatus,
+  type NativeVoice,
+} from '../lib/tts/native';
 import { listWebVoices } from '../lib/tts/webSpeech';
 import { EDGE_VOICES } from '../lib/tts/edge';
 import { speechController } from '../lib/tts/controller';
@@ -30,6 +39,7 @@ const THEMES: { id: ThemeId; label: string; bg: string; fg: string }[] = [
 export function Settings({ onBack, onToast }: SettingsProps) {
   const { reader, tts, setReader, setTts } = useSettings();
   const [nativeVoices, setNativeVoices] = useState<NativeVoice[]>([]);
+  const [status, setStatus] = useState<NativeStatus | null>(null);
   const [testing, setTesting] = useState(false);
   const [customFonts, setCustomFonts] = useState<string[]>([]);
   const [fontFamilies, setFontFamilies] = useState<Record<string, string>>({});
@@ -72,18 +82,56 @@ export function Settings({ onBack, onToast }: SettingsProps) {
 
   useEffect(() => {
     let alive = true;
+    let tries = 0;
+    // 服务里的 TTS 初始化是异步的，音色可能要等一两秒，没拿到就多问几次
     const load = async () => {
-      const res = await initNativeTts();
-      if (alive) setNativeVoices(res.voices ?? []);
+      const res = await fetchNativeVoices();
+      if (!alive) return;
+      if (res.voices.length) {
+        setNativeVoices(res.voices);
+        return;
+      }
+      if (tries < 4) {
+        tries += 1;
+        setTimeout(load, 700 * tries);
+      }
     };
+    void initNativeTts();
     void load();
-    // 原生 TTS 引擎初始化是异步的，稍后再拉一次音色列表
-    const timer = setTimeout(() => void load(), 1600);
+    void checkNativeStatus().then((s) => s && setStatus(s));
     return () => {
       alive = false;
-      clearTimeout(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const refreshStatus = async () => {
+    const s = await checkNativeStatus();
+    if (s) setStatus(s);
+  };
+
+  /** 系统设置页跳出去之后回来，状态可能已经变了，延时再读一次 */
+  const afterSystemAction = () => {
+    setTimeout(() => void refreshStatus(), 1200);
+    setTimeout(() => void refreshStatus(), 3000);
+  };
+
+  const askNotification = async () => {
+    await ReadAloud.requestNotificationPermission().catch(() => undefined);
+    onToast('请在系统弹窗里允许通知，锁屏才看得到播放控制');
+    afterSystemAction();
+  };
+
+  const askBattery = async () => {
+    await ReadAloud.requestBatteryWhitelist().catch(() => undefined);
+    afterSystemAction();
+  };
+
+  const askAutoStart = async () => {
+    await ReadAloud.openAutoStart().catch(() => undefined);
+    onToast('在「自启动管理」里允许听书阁，锁屏后才不会被清掉');
+    afterSystemAction();
+  };
 
   const webVoices = listWebVoices();
 
@@ -369,9 +417,20 @@ export function Settings({ onBack, onToast }: SettingsProps) {
                     </option>
                   ))}
               </select>
-              {(nativeVoices.length === 0 && webVoices.length === 0) && (
+              {nativeVoices.length === 0 && (
                 <div className="field__hint">
-                  没检测到可用音色。请到系统设置里安装「文字转语音」引擎（如讯飞语记、Google 语音服务）。
+                  {status && status.ttsEngines === 0
+                    ? '这台手机没有装文字转语音引擎（ColorOS 出厂常常是空的）。装上「讯飞语记」或「Google 文字转语音」再回到这里，音色列表就有了。'
+                    : '正在读取系统音色…如果一直为空，多半是语音引擎缺中文语言包。'}
+                  <button
+                    className="hint-link"
+                    onClick={async () => {
+                      await ReadAloud.openTtsSettings().catch(() => undefined);
+                      onToast('在「文字转语音」里选择一个引擎，并下载中文语音数据');
+                    }}
+                  >
+                    打开系统语音设置 ›
+                  </button>
                 </div>
               )}
             </div>
@@ -468,6 +527,46 @@ export function Settings({ onBack, onToast }: SettingsProps) {
             </span>
           </button>
         </section>
+
+        {/* 后台运行守护：ColorOS 不处理这几项，锁屏几分钟就会被冻结 */}
+        {isNative() && (
+          <section className="panel">
+            <div className="panel__title">后台朗读守护</div>
+            <p className="guard__desc">
+              OPPO 的 ColorOS 会冻结后台应用，锁屏几分钟就停。下面三项都放行，合上屏幕也能一直念。
+            </p>
+            <div className="guard">
+              <div className="guard__row">
+                <span className="guard__name">通知权限</span>
+                <span className={`guard__state${status?.notifications ? ' ok' : ''}`}>
+                  {status ? (status.notifications ? '已开启' : '未开启') : '检测中'}
+                </span>
+                <button className="guard__btn" onClick={() => void askNotification()}>
+                  去开启
+                </button>
+              </div>
+              <div className="guard__row">
+                <span className="guard__name">忽略电池优化</span>
+                <span className={`guard__state${status?.batteryWhitelisted ? ' ok' : ''}`}>
+                  {status ? (status.batteryWhitelisted ? '已开启' : '未开启') : '检测中'}
+                </span>
+                <button className="guard__btn" onClick={() => void askBattery()}>
+                  去设置
+                </button>
+              </div>
+              <div className="guard__row">
+                <span className="guard__name">自启动 / 后台运行</span>
+                <span className="guard__state">需手动允许</span>
+                <button className="guard__btn" onClick={() => void askAutoStart()}>
+                  去设置
+                </button>
+              </div>
+            </div>
+            <div className="field__hint">
+              另外在「设置 → 应用管理 → 听书阁 → 耗电管理」里选「允许后台活动」，锁屏后才不会断。
+            </div>
+          </section>
+        )}
 
         {/* 账号与同步 */}
         <section className="panel">

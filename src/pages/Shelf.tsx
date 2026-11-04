@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLibrary } from '../store/useLibrary';
 import type { BookMeta, ShelfView } from '../types';
+import { ACCEPT_ATTR, FORMAT_HINT, isSupported } from '../lib/formats';
 import {
   IconBook,
   IconCheck,
@@ -57,9 +58,9 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const list = Array.from(files).filter((f) => /\.(txt|epub)$/i.test(f.name));
+    const list = Array.from(files).filter((f) => isSupported(f.name));
     if (list.length === 0) {
-      onToast('请选择 .txt 或 .epub 文件');
+      onToast(`请选择 ${FORMAT_HINT} 文件`);
       return;
     }
     if (list.length === 1) {
@@ -203,7 +204,7 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
       <input
         ref={fileRef}
         type="file"
-        accept=".txt,.epub,text/plain,application/epub+zip"
+        accept={ACCEPT_ATTR}
         multiple
         hidden
         onChange={(e) => {
@@ -285,7 +286,7 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
           </div>
           <div className="empty__title">书架还是空的</div>
           <p className="empty__desc">
-            支持 TXT 与 EPUB。导入后可以像翻书一样读，
+            支持 {FORMAT_HINT}。导入后可以像翻书一样读，
             <br />
             也可以让它在后台一句句念给你听。
           </p>

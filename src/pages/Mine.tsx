@@ -1,6 +1,7 @@
 import { useMemo, useRef } from 'react';
 import { useLibrary } from '../store/useLibrary';
 import { useSettings } from '../store/useSettings';
+import { ACCEPT_ATTR, FORMAT_HINT, isSupported } from '../lib/formats';
 import {
   IconChevron,
   IconHeadphone,
@@ -42,9 +43,9 @@ export function Mine({ onOpenSettings, onOpenBook, onToast }: MineProps) {
 
   const handleImport = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const list = Array.from(files).filter((f) => /\.(txt|epub)$/i.test(f.name));
+    const list = Array.from(files).filter((f) => isSupported(f.name));
     if (list.length === 0) {
-      onToast('请选择 .txt 或 .epub 文件');
+      onToast(`请选择 ${FORMAT_HINT} 文件`);
       return;
     }
     let ok = 0;
@@ -127,7 +128,7 @@ export function Mine({ onOpenSettings, onOpenBook, onToast }: MineProps) {
             <IconUpload size={20} />
           </span>
           <b>导入</b>
-          <span>TXT / EPUB</span>
+          <span>7 种格式</span>
         </button>
       </div>
 
@@ -144,7 +145,7 @@ export function Mine({ onOpenSettings, onOpenBook, onToast }: MineProps) {
         </button>
         <button className="mrow" onClick={() => fileRef.current?.click()}>
           <span className="mrow__label">导入本地书籍</span>
-          <span className="mrow__value">TXT / EPUB</span>
+          <span className="mrow__value">TXT · EPUB · PDF …</span>
           <IconChevron size={14} />
         </button>
         <button className="mrow" onClick={() => onToast('书籍与阅读进度均保存在本机，不会上传')}>
@@ -152,9 +153,9 @@ export function Mine({ onOpenSettings, onOpenBook, onToast }: MineProps) {
           <span className="mrow__value">纯本地</span>
           <IconChevron size={14} />
         </button>
-        <button className="mrow" onClick={() => onToast('听书阁 v1.3.0 · 本地离线阅读器')}>
+        <button className="mrow" onClick={() => onToast('听书阁 v1.4.0 · 本地离线阅读器')}>
           <span className="mrow__label">关于听书阁</span>
-          <span className="mrow__value">v1.3.0</span>
+          <span className="mrow__value">v1.4.0</span>
           <IconChevron size={14} />
         </button>
       </div>
@@ -166,7 +167,7 @@ export function Mine({ onOpenSettings, onOpenBook, onToast }: MineProps) {
       <input
         ref={fileRef}
         type="file"
-        accept=".txt,.epub,text/plain,application/epub+zip"
+        accept={ACCEPT_ATTR}
         multiple
         hidden
         onChange={(e) => {

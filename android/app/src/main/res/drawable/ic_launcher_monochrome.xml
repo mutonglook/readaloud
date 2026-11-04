@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 13+ 主题图标：只保留书本剪影，系统会按壁纸色调染色 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M52,31.5 C44,27.5 33,28.5 26,30.5 L26,74.5 C33,72.5 44,71.5 52,76.5 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M56,31.5 C64,27.5 75,28.5 82,30.5 L82,74.5 C75,72.5 64,71.5 56,76.5 Z" />
+</vector>
