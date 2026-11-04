@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ReaderSettings, TtsSettings } from '../types';
+import type { ReaderSettings, SyncSettings, TtsSettings } from '../types';
 
 interface SettingsState {
   reader: ReaderSettings;
   tts: TtsSettings;
+  sync: SyncSettings;
   setReader: (patch: Partial<ReaderSettings>) => void;
   setTts: (patch: Partial<TtsSettings>) => void;
+  setSync: (patch: Partial<SyncSettings>) => void;
   reset: () => void;
 }
 
@@ -18,7 +20,7 @@ export const defaultReader: ReaderSettings = {
   weight: 400,
   fontFamily: 'serif',
   padding: 22,
-  pageMode: 'slide',
+  pageMode: 'simulate',
   brightness: 1,
   autoScroll: true,
   immersive: false,
@@ -26,6 +28,7 @@ export const defaultReader: ReaderSettings = {
 
 export const defaultTts: TtsSettings = {
   provider: 'native',
+  nativeEngine: '',
   nativeVoice: '',
   rate: 1,
   pitch: 1,
@@ -33,8 +36,15 @@ export const defaultTts: TtsSettings = {
   onlineApiKey: '',
   onlineModel: 'tts-1',
   onlineVoice: 'alloy',
-  edgeVoice: 'zh-CN-XiaoxiaoNeural',
   gapMs: 260,
+};
+
+export const defaultSync: SyncSettings = {
+  provider: 'none',
+  url: 'https://dav.jianguoyun.com/dav/',
+  account: '',
+  password: '',
+  auto: false,
 };
 
 export const useSettings = create<SettingsState>()(
@@ -42,22 +52,29 @@ export const useSettings = create<SettingsState>()(
     (set) => ({
       reader: defaultReader,
       tts: defaultTts,
+      sync: defaultSync,
       setReader: (patch) => set((s) => ({ reader: { ...s.reader, ...patch } })),
       setTts: (patch) => set((s) => ({ tts: { ...s.tts, ...patch } })),
-      reset: () => set({ reader: defaultReader, tts: defaultTts }),
+      setSync: (patch) => set((s) => ({ sync: { ...s.sync, ...patch } })),
+      reset: () => set({ reader: defaultReader, tts: defaultTts, sync: defaultSync }),
     }),
     {
       name: 'readaloud-settings',
-      version: 3,
-      // 老版本只有 serif/sans 两种字体，也没有沉浸式、Edge 音色、翻页方式等字段，
-      // 升级时用默认值补齐缺失项，避免读取出 undefined
+      version: 4,
+      // 逐版本补齐缺失字段，避免读出来是 undefined：
+      // v1 只有 serif/sans，v2 加了沉浸式，v3 加了字体/翻页，v4 去掉了 Edge、加了云同步与字体包
       migrate: (persisted, version) => {
         const state = persisted as Partial<SettingsState> | undefined;
-        if (!state || version >= 3) return state as SettingsState;
+        if (!state) return undefined as unknown as SettingsState;
+        // Edge 引擎已移除，老用户如果在用会自动回到离线朗读
+        const tts = { ...defaultTts, ...(state.tts ?? {}) } as TtsSettings & { edgeVoice?: string };
+        if ((tts.provider as string) === 'edge') tts.provider = 'native';
+        delete tts.edgeVoice;
         return {
           ...state,
           reader: { ...defaultReader, ...(state.reader ?? {}) },
-          tts: { ...defaultTts, ...(state.tts ?? {}) },
+          tts,
+          sync: { ...defaultSync, ...(state.sync ?? {}) },
         } as SettingsState;
       },
     },

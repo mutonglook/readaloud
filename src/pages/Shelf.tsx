@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLibrary } from '../store/useLibrary';
 import type { BookMeta, ShelfView } from '../types';
+import { ACCEPT_ATTR, FORMAT_HINT, isSupported } from '../lib/formats';
+import { pickBookFiles } from '../lib/tts/native';
 import {
   IconBook,
   IconCheck,
@@ -25,6 +27,13 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'done', label: '已读' },
 ];
 
+/** 书名下的第二行，掌阅书架就是这一行灰字：未读显示作者，读过显示进度 */
+function metaText(pct: number, author?: string) {
+  if (pct >= 100) return '已读完';
+  if (pct > 0) return `读至 ${pct}%`;
+  return author && author.trim() ? author : '未读';
+}
+
 export function Shelf({ onOpen, onToast }: ShelfProps) {
   const { books, progress, loading, importing, error, refresh, importFile, remove, importSample } =
     useLibrary();
@@ -46,13 +55,26 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
     if (error) onToast(error);
   }, [error, onToast]);
 
-  const pickFiles = () => fileRef.current?.click();
+  const pickFiles = async () => {
+    // 原生壳里走系统文件管理器（ColorOS 的文件管理 / 最近文件），
+    // 浏览器里退回 <input type=file>
+    try {
+      const picked = await pickBookFiles(true);
+      if (picked === null) {
+        fileRef.current?.click();
+        return;
+      }
+      if (picked.length) void handleFiles(picked);
+    } catch (err) {
+      onToast((err as Error).message || '打开文件管理器失败');
+    }
+  };
 
-  const handleFiles = async (files: FileList | null) => {
+  const handleFiles = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
-    const list = Array.from(files).filter((f) => /\.(txt|epub)$/i.test(f.name));
+    const list = Array.from(files).filter((f) => isSupported(f.name));
     if (list.length === 0) {
-      onToast('请选择 .txt 或 .epub 文件');
+      onToast(`请选择 ${FORMAT_HINT} 文件`);
       return;
     }
     if (list.length === 1) {
@@ -162,12 +184,21 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
   return (
     <div className="sh">
       <header className="sh__top">
-        <h1 className="sh__title">{managing ? `已选 ${selected.size} 本` : '书架'}</h1>
-        <div className="sh__tools">
-          {!managing && (
-            <>
+        {managing ? (
+          <>
+            <h1 className="sh__title">已选 {selected.size} 本</h1>
+            <div className="sh__tools">
+              <button className="sh__text-btn" onClick={exitManage}>
+                完成
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h1 className="sh__title">书架</h1>
+            <div className="sh__tools">
               <button
-                className="icon-btn"
+                className={`icon-btn${searchOpen ? ' on' : ''}`}
                 onClick={() => {
                   setSearchOpen((v) => !v);
                   if (searchOpen) setQuery('');
@@ -176,26 +207,18 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
               >
                 {searchOpen ? <IconClose size={19} /> : <IconSearch size={19} />}
               </button>
-              <button className="icon-btn" onClick={pickFiles} aria-label="导入书籍">
-                <IconPlus />
+              <button className="icon-btn" onClick={() => void pickFiles()} aria-label="导入本地书籍">
+                <IconPlus size={20} />
               </button>
-            </>
-          )}
-          {managing && (
-            <button
-              onClick={exitManage}
-              style={{ padding: '0 12px', fontSize: 14, color: 'var(--brand)' }}
-            >
-              完成
-            </button>
-          )}
-        </div>
+            </div>
+          </>
+        )}
       </header>
 
       <input
         ref={fileRef}
         type="file"
-        accept=".txt,.epub,text/plain,application/epub+zip"
+        accept={ACCEPT_ATTR}
         multiple
         hidden
         onChange={(e) => {
@@ -204,10 +227,10 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
         }}
       />
 
-      {searchOpen && (
+      {searchOpen && !managing && (
         <div className="search">
           <span className="search__icon" aria-hidden="true">
-            <IconSearch size={17} />
+            <IconSearch size={16} />
           </span>
           <input
             className="search__input"
@@ -220,13 +243,36 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
           />
           {searching && (
             <button className="search__clear" onClick={() => setQuery('')} aria-label="清空搜索">
-              <IconClose size={13} />
+              <IconClose size={12} />
             </button>
           )}
         </div>
       )}
 
-      {/* 最近阅读：掌阅首页的"继续阅读"入口 */}
+      {books.length > 0 && !managing && (
+        <div className="sh__bar">
+          <div className="sh__tabs">
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                className={`sh__tab${filter === f.key ? ' on' : ''}`}
+                onClick={() => setFilter(f.key)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <button
+            className="sh__view"
+            onClick={() => setView(view === 'grid' ? 'list' : 'grid')}
+            aria-label={view === 'grid' ? '切换为列表视图' : '切换为封面视图'}
+          >
+            {view === 'grid' ? <IconRows size={17} /> : <IconGrid size={17} />}
+          </button>
+        </div>
+      )}
+
+      {/* 继续阅读：掌阅书架顶部的续读横条 */}
       {recent && !searching && filter === 'all' && !managing && (
         <div className="recent" onClick={() => onOpen(recent.id)}>
           <div className="recent__cover">
@@ -237,70 +283,32 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
             <div className="recent__title">{recent.title}</div>
             <div className="recent__sub">
               {progress[recent.id]?.chapterIndex != null
-                ? `读到第 ${(progress[recent.id]?.chapterIndex ?? 0) + 1} 章 · ${pctOf(recent.id)}%`
+                ? `第 ${(progress[recent.id]?.chapterIndex ?? 0) + 1} 章 · ${pctOf(recent.id)}%`
                 : `共 ${recent.chapterCount} 章`}
             </div>
           </div>
-          <button className="recent__btn" onClick={() => onOpen(recent.id)}>
-            继续
-          </button>
-        </div>
-      )}
-
-      {books.length > 0 && (
-        <div className="sh__bar">
-          <div className="chips">
-            {FILTERS.map((f) => (
-              <button
-                key={f.key}
-                className={`chip${filter === f.key ? ' active' : ''}`}
-                onClick={() => setFilter(f.key)}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <div className="view-toggle">
-            <button
-              className={view === 'grid' ? 'on' : ''}
-              onClick={() => setView('grid')}
-              aria-label="封面视图"
-            >
-              <IconGrid />
-            </button>
-            <button
-              className={view === 'list' ? 'on' : ''}
-              onClick={() => setView('list')}
-              aria-label="列表视图"
-            >
-              <IconRows />
-            </button>
-          </div>
+          <span className="recent__go" aria-hidden="true">
+            ›
+          </span>
         </div>
       )}
 
       {books.length === 0 && !loading ? (
         <div className="empty">
           <div className="empty__art">
-            <IconBook size={110} />
+            <IconBook size={104} />
           </div>
           <div className="empty__title">书架还是空的</div>
           <p className="empty__desc">
-            支持 TXT 与 EPUB。导入后可以像翻书一样读，
+            支持 {FORMAT_HINT}。导入后可以像翻书一样读，
             <br />
             也可以让它在后台一句句念给你听。
           </p>
-          <button className="empty__cta" onClick={pickFiles}>
+          <button className="empty__cta" onClick={() => void pickFiles()}>
             导入第一本书
           </button>
           <button
-            style={{
-              marginTop: 14,
-              fontSize: 13,
-              color: 'var(--app-text-3)',
-              textDecoration: 'underline',
-              textUnderlineOffset: 4,
-            }}
+            className="empty__link"
             onClick={async () => {
               const b = await importSample();
               onOpen(b.id);
@@ -320,7 +328,7 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
                 或者清空搜索看全部 {books.length} 本。
               </>
             ) : (
-              <>当前筛选下没有内容，切到「全部」看看。</>
+              <>当前分组下没有内容，切到「全部」看看。</>
             )}
           </p>
           <button
@@ -340,7 +348,7 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
             const on = selected.has(b.id);
             return (
               <div
-                className="bk"
+                className={`bk${managing && on ? ' picked' : ''}`}
                 key={b.id}
                 style={{ animationDelay: `${Math.min(i * 22, 240)}ms` }}
                 onClick={() => handleOpen(b)}
@@ -364,9 +372,7 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
                   )}
                 </div>
                 <div className="bk__title">{b.title}</div>
-                <div className="bk__meta">
-                  {b.author} · {b.chapterCount} 章
-                </div>
+                <div className="bk__meta">{metaText(pct, b.author)}</div>
               </div>
             );
           })}
@@ -376,30 +382,32 @@ export function Shelf({ onOpen, onToast }: ShelfProps) {
           {filtered.map((b) => {
             const pct = pctOf(b.id);
             return (
-              <div className="row" key={b.id} onClick={() => handleOpen(b)}>
+              <div
+                className="row"
+                key={b.id}
+                onClick={() => handleOpen(b)}
+                onPointerDown={() => startPress(b.id)}
+                onPointerUp={cancelPress}
+                onPointerMove={cancelPress}
+                onPointerCancel={cancelPress}
+                onContextMenu={(e) => e.preventDefault()}
+              >
                 {cover(b, 'row__cover')}
                 <div className="row__main">
                   <div className="row__title">{b.title}</div>
                   <div className="row__sub">
-                    {b.author} ·{' '}
-                    {progress[b.id]
-                      ? `读到第 ${(progress[b.id]?.chapterIndex ?? 0) + 1} 章`
-                      : `共 ${b.chapterCount} 章`}
+                    {b.author || '未知作者'} · 共 {b.chapterCount} 章
                   </div>
-                  {pct > 0 && (
-                    <div className="row__pct">
-                      <i style={{ width: `${pct}%` }} />
-                    </div>
-                  )}
+                  <div className="row__pct">
+                    <i style={{ width: `${pct}%` }} />
+                  </div>
                 </div>
                 {managing ? (
-                  <div className={`bk__sel${selected.has(b.id) ? ' on' : ''}`} style={{ position: 'static' }}>
+                  <div className={`row__sel${selected.has(b.id) ? ' on' : ''}`}>
                     <IconCheck size={12} />
                   </div>
                 ) : (
-                  <span className="row__chev" aria-hidden="true">
-                    ›
-                  </span>
+                  <span className="row__meta">{pct > 0 ? `${pct}%` : '未读'}</span>
                 )}
               </div>
             );

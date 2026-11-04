@@ -4,8 +4,8 @@ import { useLibrary } from '../store/useLibrary';
 import { useSettings } from '../store/useSettings';
 import { splitSentences } from '../lib/splitter';
 import { speechController } from '../lib/tts/controller';
-import { setImmersive } from '../lib/tts/native';
-import { FONT_OPTIONS, resolveFontStack } from '../lib/fonts';
+import { setImmersive, setDarkStatusIcons } from '../lib/tts/native';
+import { FONT_PACKS, SYSTEM_FONTS, resolveFontStack } from '../lib/fonts';
 import { usePlayerState } from '../hooks/usePlayerState';
 import {
   IconBack,
@@ -39,10 +39,27 @@ const THEMES: { id: ThemeId; label: string; bg: string; fg: string }[] = [
 ];
 
 const PAGE_MODES: { id: PageMode; label: string }[] = [
+  { id: 'simulate', label: '仿真' },
+  { id: 'cover', label: '覆盖' },
   { id: 'slide', label: '平移' },
   { id: 'none', label: '无动画' },
-  { id: 'flow', label: '上下滚动' },
+  { id: 'flow', label: '滚动' },
 ];
+
+type FlipMode = 'cover' | 'simulate';
+
+/** 一次翻页动画的运行时状态，全部放在 ref 里，拖动时 60fps 不碰 React state */
+interface FlipRun {
+  layer: HTMLElement;
+  shade: HTMLElement;
+  mode: FlipMode;
+  dir: 1 | -1;
+  target: number;
+  origin: number;
+  /** 动画一开始就把真身切到目标页（仿真前翻 / 覆盖后翻） */
+  commitAtStart: boolean;
+  settled: boolean;
+}
 
 export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps) {
   const { loadBook, saveReading, progress } = useLibrary();
@@ -59,8 +76,20 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
   const [sheetOpen, setSheetOpen] = useState(false);
   const [listenOpen, setListenOpen] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  const [fontStack, setFontStack] = useState(FONT_OPTIONS[0].stack);
+  const [fontStack, setFontStack] = useState(SYSTEM_FONTS[0].stack);
   const [restored, setRestored] = useState(false);
+  // 掌阅页脚右侧是「时间 · 页码 · 百分比」，这里每半分钟走一次
+  const [clock, setClock] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = setInterval(() => setClock(new Date()), 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  // 沉浸式状态栏：夜间背景要用浅色图标，浅色背景用深色图标
+  useEffect(() => {
+    void setDarkStatusIcons(reader.theme !== 'night');
+  }, [reader.theme]);
 
   const streamRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -72,19 +101,24 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
   const swiped = useRef(false);
   const longPress = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTheme = useRef<ThemeId>(reader.theme === 'night' ? 'paper' : reader.theme);
+  const flipHostRef = useRef<HTMLDivElement>(null);
+  const flipRef = useRef<FlipRun | null>(null);
+  const dragRef = useRef<{ p: number } | null>(null);
 
   const flow = reader.pageMode === 'flow';
+  const flipMode: FlipMode | null =
+    reader.pageMode === 'simulate' ? 'simulate' : reader.pageMode === 'cover' ? 'cover' : null;
 
   /* ---------------------------- 字体注册 ---------------------------- */
   useEffect(() => {
     let alive = true;
-    void resolveFontStack(reader.fontFamily, reader.customFont).then((stack) => {
+    void resolveFontStack(reader.fontFamily, reader.customFont, reader.fontPack).then((stack) => {
       if (alive) setFontStack(stack);
     });
     return () => {
       alive = false;
     };
-  }, [reader.fontFamily, reader.customFont]);
+  }, [reader.fontFamily, reader.customFont, reader.fontPack]);
 
   /* ---------------------------- 载入书籍 ---------------------------- */
   useEffect(() => {
@@ -244,25 +278,157 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
     [book, player.playing, persist],
   );
 
+  /* ---------------------------- 翻页动画 ---------------------------- */
+
+  /** 收掉正在进行的动画层 */
+  const killFlip = useCallback(() => {
+    const f = flipRef.current;
+    if (!f) return;
+    f.settled = true;
+    f.layer.remove();
+    flipRef.current = null;
+  }, []);
+
+  /**
+   * 造一层翻页动画。
+   *
+   * 关键点：动画层是 cloneNode 出来的真实 DOM，不走 React。
+   * 长章节有上千个 span，靠 React 复制一遍会掉帧，原生克隆只要几毫秒。
+   */
+  const buildFlip = useCallback(
+    (mode: FlipMode, dir: 1 | -1, target: number, origin: number): FlipRun | null => {
+      const host = flipHostRef.current;
+      const stream = streamRef.current;
+      const stage = stageRef.current;
+      if (!host || !stream || !stage) return null;
+      killFlip();
+
+      // 覆盖：前翻时动画层是「新页」从右侧进来；后翻时是「旧页」往右退出
+      // 仿真：前翻时动画层是「旧页」被翻走；后翻时是「新页」从左侧翻回来
+      const commitAtStart = mode === 'cover' ? dir < 0 : dir > 0;
+      const shownPage = mode === 'cover' ? (dir > 0 ? target : origin) : dir > 0 ? origin : target;
+
+      const layer = document.createElement('div');
+      layer.className = `rd__flip rd__flip--${mode === 'cover' ? 'cover' : 'sim'}`;
+
+      const clone = stream.cloneNode(true) as HTMLElement;
+      clone.style.setProperty('--pg', String(shownPage));
+      clone.style.setProperty('--turn', '0ms');
+      clone.removeAttribute('data-live');
+      layer.appendChild(clone);
+
+      // 页脚要跟着页走，否则翻动过程中底部是空的
+      const foot = stage.querySelector('.rd__foot');
+      if (foot) {
+        const f = foot.cloneNode(true) as HTMLElement;
+        f.style.opacity = '1';
+        layer.appendChild(f);
+      }
+
+      const shade = document.createElement('div');
+      shade.className = 'rd__flip__shade';
+      layer.appendChild(shade);
+
+      if (mode === 'simulate') {
+        layer.style.transform = `rotateY(${dir > 0 ? 0 : -180}deg)`;
+      } else {
+        layer.style.transform = `translate3d(${dir > 0 ? 100 : 0}%, 0, 0)`;
+      }
+
+      host.appendChild(layer);
+
+      const run: FlipRun = { layer, shade, mode, dir, target, origin, commitAtStart, settled: false };
+      flipRef.current = run;
+      if (commitAtStart) setPage(target);
+      return run;
+    },
+    [killFlip],
+  );
+
+  /** 拖动过程中按进度摆姿势 */
+  const paintFlip = useCallback((run: FlipRun, p: number) => {
+    const t = Math.max(0, Math.min(1, p));
+    if (run.mode === 'cover') {
+      const x = run.dir > 0 ? (1 - t) * 100 : t * 100;
+      run.layer.style.transform = `translate3d(${x}%, 0, 0)`;
+    } else {
+      const angle = run.dir > 0 ? -t * 180 : -180 + t * 180;
+      run.layer.style.transform = `rotateY(${angle}deg)`;
+      run.shade.style.setProperty('--sp', String(Math.sin(t * Math.PI)));
+    }
+  }, []);
+
+  /** 松手后决定翻过去还是弹回来 */
+  const finishFlip = useCallback(
+    (commit: boolean) => {
+      const run = flipRef.current;
+      if (!run || run.settled) return;
+      run.settled = true;
+
+      // 先读一次布局，把当前姿势提交掉，否则 transition 不会触发
+      void run.layer.offsetWidth;
+      run.layer.style.transition = 'transform 320ms cubic-bezier(.28,.72,.3,1)';
+
+      if (run.mode === 'cover') {
+        const x = commit ? (run.dir > 0 ? 0 : 100) : run.dir > 0 ? 100 : 0;
+        run.layer.style.transform = `translate3d(${x}%, 0, 0)`;
+      } else {
+        const angle = commit ? (run.dir > 0 ? -180 : 0) : run.dir > 0 ? 0 : -180;
+        run.layer.style.transform = `rotateY(${angle}deg)`;
+        run.shade.style.setProperty('--sp', '0');
+      }
+
+      const settle = () => {
+        run.layer.remove();
+        if (flipRef.current === run) flipRef.current = null;
+        if (commit) {
+          if (!run.commitAtStart) setPage(run.target);
+        } else if (run.commitAtStart) {
+          // 中途放弃要把真身退回去
+          setPage(run.origin);
+        }
+      };
+      run.layer.addEventListener('transitionend', settle, { once: true });
+      window.setTimeout(() => {
+        if (run.layer.isConnected) settle();
+      }, 340);
+    },
+    [],
+  );
+
   const nextPage = useCallback(() => {
     if (flow) return;
     if (page < pages - 1) {
+      if (flipMode) {
+        const run = buildFlip(flipMode, 1, page + 1, page);
+        if (run) {
+          finishFlip(true);
+          return;
+        }
+      }
       setPage((p) => p + 1);
       return;
     }
     if (book && chapterIndex + 1 < book.chapters.length) void jumpChapter(chapterIndex + 1);
     else showHint('已经是最后一页');
-  }, [flow, page, pages, book, chapterIndex, jumpChapter]);
+  }, [flow, page, pages, book, chapterIndex, jumpChapter, flipMode, buildFlip, finishFlip]);
 
   const prevPage = useCallback(() => {
     if (flow) return;
     if (page > 0) {
+      if (flipMode) {
+        const run = buildFlip(flipMode, -1, page - 1, page);
+        if (run) {
+          finishFlip(true);
+          return;
+        }
+      }
       setPage((p) => p - 1);
       return;
     }
     if (chapterIndex > 0) void jumpChapter(chapterIndex - 1);
     else showHint('已经是第一页');
-  }, [flow, page, chapterIndex, jumpChapter]);
+  }, [flow, page, chapterIndex, jumpChapter, flipMode, buildFlip, finishFlip]);
 
   /* ---------------------------- 点击分区 ---------------------------- */
   const onStageClick = (e: React.MouseEvent) => {
@@ -289,17 +455,59 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
   };
 
   const onTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
     const t = e.touches[0];
     touchStart.current = { x: t.clientX, y: t.clientY };
+    dragRef.current = null;
+  };
+
+  // 仿真 / 覆盖模式：手指按住拖动，纸页跟着手指走
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (!flipMode || flow) return;
+    const s = touchStart.current;
+    if (!s) return;
+    const t = e.touches[0];
+    const dx = t.clientX - s.x;
+    const dy = t.clientY - s.y;
+
+    if (!dragRef.current) {
+      // 先判方向，避免上下滑动误触发翻页
+      if (Math.abs(dx) < 14 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+      const dir: 1 | -1 = dx < 0 ? 1 : -1;
+      const target = page + dir;
+      if (target < 0 || target >= pages) return;
+      const run = buildFlip(flipMode, dir, target, page);
+      if (!run) return;
+      dragRef.current = { p: 0 };
+    }
+
+    const run = flipRef.current;
+    if (!run) return;
+    const p = Math.min(1, Math.abs(dx) / Math.max(1, window.innerWidth));
+    dragRef.current.p = p;
+    paintFlip(run, p);
   };
 
   const onTouchEnd = (e: React.TouchEvent) => {
     const s = touchStart.current;
     touchStart.current = null;
-    if (!s || flow) return;
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!s) return;
+
     const t = e.changedTouches[0];
     const dx = t.clientX - s.x;
     const dy = t.clientY - s.y;
+
+    if (drag && flipRef.current) {
+      swiped.current = true;
+      const p = drag.p;
+      finishFlip(p > 0.28 || Math.abs(dx) > window.innerWidth * 0.24);
+      setTimeout(() => (swiped.current = false), 360);
+      return;
+    }
+
+    if (flow) return;
     if (Math.abs(dx) > 46 && Math.abs(dx) > Math.abs(dy) * 1.3) {
       swiped.current = true;
       if (dx < 0) nextPage();
@@ -411,6 +619,7 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
     ((chapterIndex + (pages > 1 ? page / pages : 0)) / book.chapters.length) * 100,
   );
   const dim = (1 - reader.brightness) * 0.72;
+  const clockText = `${String(clock.getHours()).padStart(2, '0')}:${String(clock.getMinutes()).padStart(2, '0')}`;
   const tocList = tocAsc ? book.chapters.map((c, i) => ({ c, i })) : book.chapters.map((c, i) => ({ c, i })).reverse();
 
   return (
@@ -436,6 +645,7 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
         className="rd__stage"
         onClick={onStageClick}
         onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
       >
         <div
@@ -482,17 +692,23 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
           </div>
         </div>
 
-        {/* 页脚：章节 + 页码 */}
+        {/* 页脚：章节 + 时间/页码，掌阅的这一行一直显示在正文下方 */}
         {!flow && (
           <div className="rd__foot">
-            <span>{chapter.title}</span>
-            <span>
-              {page + 1}/{pages} · {chapterPct}%
+            <span className="rd__foot-ch">{chapter.title}</span>
+            <span className="rd__foot-pg">
+              {clockText}
+              <em>·</em>
+              {page + 1}/{pages}
+              <em>·</em>
+              {chapterPct}%
             </span>
           </div>
         )}
 
         {hint && <div className="rd__hint">{hint}</div>}
+        {/* 翻页动画层，DOM 由 JS 直接克隆进来，React 不管这块 */}
+        <div ref={flipHostRef} className="rd__flip-host" />
         <div className="rd__dim" />
       </div>
 
@@ -555,10 +771,6 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
             {reader.theme === 'night' ? <IconSun size={20} /> : <IconMoon size={20} />}
             夜间
           </button>
-          <button className="rd__tool" onClick={() => openSheet('type')}>
-            <IconType size={20} />
-            字体
-          </button>
           <button
             className={`rd__tool${isSpeakingHere ? ' on' : ''}`}
             onClick={() => {
@@ -568,6 +780,10 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
           >
             <IconHeadphone size={20} />
             听书
+          </button>
+          <button className="rd__tool" onClick={() => openSheet('type')}>
+            <IconType size={20} />
+            字体
           </button>
           <button className="rd__tool" onClick={() => openSheet('all')}>
             <IconMore size={20} />
@@ -702,11 +918,11 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
             <div className="pset__row">
               <span className="pset__lab">字体</span>
               <div className="segmented" style={{ flex: 1, marginLeft: 12 }}>
-                {FONT_OPTIONS.slice(0, 4).map((f) => (
+                {SYSTEM_FONTS.map((f) => (
                   <button
                     key={f.id}
                     className={reader.fontFamily === f.id ? 'active' : ''}
-                    onClick={() => setReader({ fontFamily: f.id, customFont: undefined })}
+                    onClick={() => setReader({ fontFamily: f.id, customFont: undefined, fontPack: undefined })}
                     style={{ fontFamily: f.stack }}
                   >
                     {f.label}
@@ -714,6 +930,21 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
                 ))}
               </div>
             </div>
+
+            <button
+              className="pset__fontmore"
+              onClick={() => {
+                setSheetOpen(false);
+                onOpenSettings();
+              }}
+            >
+              <span>
+                更多字体
+                {reader.fontFamily === 'pack' &&
+                  `　当前：${FONT_PACKS.find((p) => p.id === reader.fontPack)?.name ?? '开源字体'}`}
+              </span>
+              <em>{FONT_PACKS.length} 款开源字体 ›</em>
+            </button>
 
             <div className="pset__row">
               <span className="pset__lab">翻页</span>
@@ -796,11 +1027,9 @@ export function Reader({ bookId, onBack, onOpenSettings, onToast }: ReaderProps)
               <IconHeadphone size={12} />
               {player.mode === 'native'
                 ? '离线朗读 · 可后台'
-                : player.mode === 'edge'
-                  ? 'Edge 免费语音'
-                  : player.mode === 'online'
-                    ? '在线 AI 语音'
-                    : '系统语音'}
+                : player.mode === 'online'
+                  ? '在线 AI 语音'
+                  : '系统语音'}
             </div>
             <div className="listen__text">{player.currentText || '准备中…'}</div>
             <div className="listen__ctrls">

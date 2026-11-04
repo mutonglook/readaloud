@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Shelf } from './pages/Shelf';
-import { Store } from './pages/Store';
-import { Discover } from './pages/Discover';
 import { Mine } from './pages/Mine';
 import { Reader } from './pages/Reader';
 import { Settings } from './pages/Settings';
 import { TabBar, type TabKey } from './components/TabBar';
 import { useSettings } from './store/useSettings';
 import { speechController } from './lib/tts/controller';
-import { isNative, setImmersive } from './lib/tts/native';
+import { isNative, setDarkStatusIcons, setImmersive } from './lib/tts/native';
 import { App as CapApp } from '@capacitor/app';
 
 export default function App() {
@@ -29,6 +27,11 @@ export default function App() {
   useEffect(() => {
     void setImmersive(immersive);
   }, [immersive]);
+
+  // 外壳恒为浅色背景，状态栏用深色图标；退出阅读页时把它改回来
+  useEffect(() => {
+    if (!readerId) void setDarkStatusIcons(true);
+  }, [readerId]);
 
   // 原生端：从后台回到前台时同步播放状态（通知栏可能改过播放/暂停）
   useEffect(() => {
@@ -73,8 +76,6 @@ export default function App() {
     <div className="app">
       <div className="app__main" ref={mainRef} key={tab}>
         {tab === 'shelf' && <Shelf onOpen={openBook} onToast={showToast} />}
-        {tab === 'store' && <Store onToast={showToast} />}
-        {tab === 'discover' && <Discover />}
         {tab === 'mine' && (
           <Mine onOpenSettings={() => setSettingsOpen(true)} onOpenBook={openBook} onToast={showToast} />
         )}

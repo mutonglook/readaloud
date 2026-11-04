@@ -2,7 +2,7 @@ import type { Chapter } from '../types';
 import { cleanTitle } from './splitter';
 
 /** 章节标题正则：覆盖常见中文网文与出版物写法 */
-const HEADING_RE =
+export const HEADING_RE =
   /^\s{0,6}(?:第\s*[0-9零一二三四五六七八九十百千万两]+\s*[章节回卷篇部集话]|序章|序言|楔子|引子|前言|后记|尾声|终章|番外|Chapter\s+\d+|CHAPTER\s+\d+)[^\n]{0,40}$/;
 
 const MAX_CHAPTER_CHARS = 12000;

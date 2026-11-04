@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- 不支持渐变的场景（极少数启动器）退回纯色 -->
+    <color name="ic_launcher_background">#164E8C</color>
 </resources>

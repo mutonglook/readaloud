@@ -2,7 +2,6 @@ import type { Book, SpeakPosition, TtsSettings } from '../../types';
 import type { SpeakResult, TtsEngine } from './engine';
 import { WebSpeechEngine } from './webSpeech';
 import { OnlineTtsEngine } from './online';
-import { EdgeTtsEngine } from './edge';
 import { ReadAloud, isNative } from './native';
 import { buildChapterQueue, positionToIndex, type Utterance } from './queue';
 
@@ -15,8 +14,8 @@ export interface PlayerState {
   sentenceIndex: number;
   currentText: string;
   chapterTitle: string;
-  /** 当前模式：原生后台朗读 / 在线 AI 语音 / Edge 免费语音 / 浏览器内置 */
-  mode: 'native' | 'online' | 'edge' | 'web';
+  /** 当前模式：原生后台朗读 / 在线 AI 语音 / 浏览器内置 */
+  mode: 'native' | 'online' | 'web';
   error: string | null;
 }
 
@@ -51,7 +50,6 @@ export class SpeechController {
 
   private webEngine = new WebSpeechEngine();
   private onlineEngine: OnlineTtsEngine | null = null;
-  private edgeEngine = new EdgeTtsEngine();
   private settings: TtsSettings | null = null;
 
   /** 递增令牌：每次 stop/pause/seek 都让旧循环作废 */
@@ -59,6 +57,8 @@ export class SpeechController {
 
   private nativeReady = false;
   private nativeBound = false;
+  /** 在线语音连不上时临时改用离线朗读，用户改设置后自动解除 */
+  private forceNative = false;
 
   getState(): PlayerState {
     return this.state;
@@ -93,33 +93,35 @@ export class SpeechController {
 
   applySettings(settings: TtsSettings) {
     this.settings = settings;
+    this.forceNative = false;
     this.onlineEngine?.updateConfig({
       baseUrl: settings.onlineBaseUrl,
       apiKey: settings.onlineApiKey,
       model: settings.onlineModel,
       voice: settings.onlineVoice,
     });
-    this.edgeEngine.updateConfig({ voice: settings.edgeVoice });
     this.emit({ mode: this.pickMode() });
   }
 
   private pickMode(): PlayerState['mode'] {
     const provider = this.settings?.provider ?? 'native';
+    if (this.forceNative && this.nativeReady) return 'native';
     if (provider === 'online') return 'online';
-    if (provider === 'edge') return 'edge';
     return isNative() && this.nativeReady ? 'native' : 'web';
   }
 
   async warmup(): Promise<void> {
-    if (this.onlineEngine) return;
-    this.onlineEngine = new OnlineTtsEngine({
-      baseUrl: this.settings?.onlineBaseUrl ?? '',
-      apiKey: this.settings?.onlineApiKey ?? '',
-      model: this.settings?.onlineModel ?? 'tts-1',
-      voice: this.settings?.onlineVoice ?? 'alloy',
-    });
+    if (!this.onlineEngine) {
+      this.onlineEngine = new OnlineTtsEngine({
+        baseUrl: this.settings?.onlineBaseUrl ?? '',
+        apiKey: this.settings?.onlineApiKey ?? '',
+        model: this.settings?.onlineModel ?? 'tts-1',
+        voice: this.settings?.onlineVoice ?? 'alloy',
+      });
+    }
 
-    if (isNative()) {
+    // 原生引擎可能晚于首帧就绪（首次调用时返回 false），这里允许重试一次
+    if (isNative() && !this.nativeReady) {
       try {
         const res = await ReadAloud.initialize();
         this.nativeReady = res.available;
@@ -209,6 +211,7 @@ export class SpeechController {
         rate: this.settings.rate,
         pitch: this.settings.pitch,
         voice: this.settings.nativeVoice || undefined,
+        engine: this.settings.nativeEngine || undefined,
       });
       this.playing = true;
       this.emit({ playing: true, error: null });
@@ -375,6 +378,26 @@ export class SpeechController {
         });
       } catch (err) {
         const message = (err as Error).message || '语音朗读失败';
+        const provider = this.settings?.provider;
+        // 在线语音连不上时自动退回离线朗读：用户要的是「能听」，不是一句报错
+        if (provider === 'online' && isNative() && this.nativeReady && this.book) {
+          this.forceNative = true;
+          this.emit({ mode: 'native' });
+          try {
+            await ReadAloud.loadQueue({
+              queue: this.queue.map((x) => x.text),
+              startIndex: this.index,
+              title: this.book.title,
+              subtitle: this.state.chapterTitle,
+            });
+            await this.playNative();
+            this.emit({ error: `${message}，已自动改用离线朗读` });
+          } catch (e) {
+            this.playing = false;
+            this.emit({ playing: false, error: (e as Error).message || message });
+          }
+          return;
+        }
         this.playing = false;
         this.emit({ playing: false, error: message });
         return;
@@ -396,14 +419,14 @@ export class SpeechController {
     const s = this.settings;
     if (!s) return undefined;
     if (s.provider === 'online') return s.onlineVoice;
-    if (s.provider === 'edge') return s.edgeVoice;
     return s.nativeVoice || undefined;
   }
 
   private pickEngine(): TtsEngine | null {
     const provider = this.settings?.provider;
-    if (provider === 'online') return this.onlineEngine;
-    if (provider === 'edge') return this.edgeEngine;
+    if (!this.forceNative) {
+      if (provider === 'online') return this.onlineEngine;
+    }
     return this.webEngine;
   }
 
@@ -429,17 +452,6 @@ export class SpeechController {
     await this.warmup();
     const s = this.settings;
 
-    if (s?.provider === 'edge') {
-      await this.edgeEngine.prepare();
-      await this.edgeEngine.speak({
-        text,
-        rate: s.rate ?? 1,
-        pitch: s.pitch ?? 1,
-        voice: s.edgeVoice,
-      });
-      return;
-    }
-
     if (s?.provider === 'online' && this.onlineEngine) {
       await this.onlineEngine.prepare();
       await this.onlineEngine.speak({
@@ -447,6 +459,19 @@ export class SpeechController {
         rate: s.rate,
         pitch: s.pitch,
         voice: s.onlineVoice,
+      });
+      return;
+    }
+
+    // 离线朗读：原生壳里必须交给系统 TTS 服务念。
+    // WebView 没有 speechSynthesis，之前这一步落在 Web Speech 上，必然报「当前环境不支持语音朗读」。
+    if (isNative() && this.nativeReady) {
+      await ReadAloud.preview({
+        text,
+        rate: s?.rate ?? 1,
+        pitch: s?.pitch ?? 1,
+        voice: s?.nativeVoice || undefined,
+        engine: s?.nativeEngine || undefined,
       });
       return;
     }

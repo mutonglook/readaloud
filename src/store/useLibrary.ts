@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import type { Book, BookMeta, ReadingProgress } from '../types';
 import * as db from '../lib/db';
-import { decodeTextBuffer, parseTxt } from '../lib/txt';
-import { parseEpub } from '../lib/epub';
+import { parseBookFile } from '../lib/formats';
 import { buildSampleBook } from '../lib/sample';
+import { useSettings } from './useSettings';
+import { pushShelf } from '../lib/sync';
 
 interface LibraryState {
   books: BookMeta[];
@@ -37,40 +38,20 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
   },
 
   importFile: async (file) => {
-    const name = file.name.replace(/\.[^.]+$/, '');
-    const ext = file.name.split('.').pop()?.toLowerCase();
     set({ importing: file.name, error: null });
     try {
-      const buffer = await file.arrayBuffer();
-      let book: Book;
-
-      if (ext === 'epub') {
-        const parsed = await parseEpub(buffer);
-        book = {
-          id: crypto.randomUUID(),
-          title: parsed.title || name,
-          author: parsed.author,
-          format: 'epub',
-          cover: parsed.cover,
-          chapters: parsed.chapters,
-          totalChars: parsed.chapters.reduce((n, c) => n + c.paragraphs.join('').length, 0),
-          addedAt: Date.now(),
-        };
-      } else if (ext === 'txt') {
-        const text = decodeTextBuffer(buffer);
-        const parsed = parseTxt(text, name);
-        book = {
-          id: crypto.randomUUID(),
-          title: parsed.title || name,
-          author: '佚名',
-          format: 'txt',
-          chapters: parsed.chapters,
-          totalChars: parsed.chapters.reduce((n, c) => n + c.paragraphs.join('').length, 0),
-          addedAt: Date.now(),
-        };
-      } else {
-        throw new Error('只支持 .txt 和 .epub 格式');
-      }
+      // 格式识别与解析统一交给 lib/formats，TXT / EPUB / HTML / MD / DOCX / FB2 / PDF 都走这里
+      const parsed = await parseBookFile(file);
+      const book: Book = {
+        id: crypto.randomUUID(),
+        title: parsed.title,
+        author: parsed.author || '佚名',
+        format: parsed.format,
+        cover: parsed.cover,
+        chapters: parsed.chapters,
+        totalChars: parsed.chapters.reduce((n, c) => n + c.paragraphs.join('').length, 0),
+        addedAt: Date.now(),
+      };
 
       if (book.totalChars < 10) throw new Error('文件内容为空或无法识别');
 
@@ -112,6 +93,7 @@ export const useLibrary = create<LibraryState>()((set, get) => ({
     set((s) => ({ progress: { ...s.progress, [p.bookId]: p } }));
     // 书架排序依赖 lastReadAt，节流刷新
     scheduleRefresh(get().refresh);
+    scheduleAutoSync();
   },
 
   importSample: async () => {
@@ -132,3 +114,31 @@ function scheduleRefresh(fn: () => Promise<void>) {
 }
 
 export const progressOf = (id: string, progress: Record<string, ReadingProgress>) => progress[id];
+
+/* ------------------------ 后台自动云同步 ------------------------ */
+
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
+let lastAutoSync = 0;
+const AUTO_SYNC_MIN_GAP = 3 * 60 * 1000;
+
+/**
+ * 进度变了就排一次上传，但最多 3 分钟一次。
+ * 只传书单和进度（很小），失败静默——不能让网络问题打断阅读。
+ */
+function scheduleAutoSync() {
+  const sync = useSettings.getState().sync;
+  if (sync.provider !== 'webdav' || !sync.auto || !sync.url || !sync.account) return;
+  if (syncTimer) return;
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    if (Date.now() - lastAutoSync < AUTO_SYNC_MIN_GAP) return;
+    lastAutoSync = Date.now();
+    const cur = useSettings.getState();
+    void pushShelf(
+      { url: cur.sync.url, account: cur.sync.account, password: cur.sync.password },
+      cur.reader,
+    )
+      .then(() => useSettings.getState().setSync({ lastSyncAt: Date.now() }))
+      .catch(() => undefined);
+  }, 8000);
+}

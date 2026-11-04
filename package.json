@@ -1,9 +1,9 @@
 {
   "name": "readaloud",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.5.0",
   "type": "module",
-  "description": "听书阁 - 支持 TXT/EPUB 阅读与语音朗读的 Android 应用",
+  "description": "听书阁 - 支持 TXT/EPUB/PDF 等多种格式阅读与语音朗读的 Android 应用",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -20,6 +20,7 @@
     "@capacitor/status-bar": "^8.0.0",
     "idb": "^8.0.4",
     "jszip": "^3.10.2",
+    "pdfjs-dist": "^4.10.38",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "zustand": "^5.0.16"
